@@ -5019,22 +5019,87 @@ if (TW_LANG === "en") {
       o.connect(g).connect(sfxBus);
       o.start(t); o.stop(t + 0.4);
     }
-    function groan(s, base, vol, pan) {
-      const o = ac.createOscillator(); o.type = "sawtooth";
+    // Zombiestemmen: en hes, ujevn tone med raspende pust, formet av munnen (fra «oo» til «aa»).
+    // rough: hvor mye den skurrer (snerring er grovere og kortere enn et stønn)
+    function zVoice(s, base, vol, pan, dur, rough, f1a, f1b, f2a, f2b, att) {
+      const end = s + dur, nodes = [];
+      const osc = (type, f) => { const o = ac.createOscillator(); o.type = type; o.frequency.value = f; nodes.push(o); return o; };
+      const gain = v => { const g = ac.createGain(); g.gain.value = v; return g; };
+      const filt = (type, f, q) => { const b = ac.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q; return b; };
+      // Tonen: glir ujevnt, med skjelving og en langsom vingling
+      const o = osc("sawtooth", base);
       o.frequency.setValueAtTime(base, s);
-      o.frequency.linearRampToValueAtTime(base * 0.62, s + 2.2);
-      const vib = ac.createOscillator(); vib.frequency.value = 4 + Math.random() * 3;
-      const vg = ac.createGain(); vg.gain.value = 5;
-      vib.connect(vg).connect(o.frequency);
-      const f = ac.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 360;
-      const g = ac.createGain();
-      g.gain.setValueAtTime(0, s);
-      g.gain.linearRampToValueAtTime(vol, s + 0.5);
-      g.gain.linearRampToValueAtTime(0, s + 2.3);
-      let node = o.connect(f).connect(g);
+      o.frequency.linearRampToValueAtTime(base * (1.05 + Math.random() * 0.15), s + dur * 0.3);
+      o.frequency.linearRampToValueAtTime(base * (0.6 + Math.random() * 0.1), end);
+      const wob = osc("sine", 0.7 + Math.random() * 1.3), wg = gain(base * 0.1); wob.connect(wg).connect(o.frequency);
+      const vib = osc("sine", 6 + Math.random() * 4), vg = gain(3 + rough * 4); vib.connect(vg).connect(o.frequency);
+      // Skurringen: stemmen hakker raskt (strupen)
+      const am = gain(1 - rough * 0.5), amO = osc("square", 24 + Math.random() * 18), amG = gain(rough * 0.5);
+      amO.connect(amG).connect(am.gain);
+      o.connect(am);
+      // Raspende pust
+      const ns = ac.createBufferSource(); ns.buffer = noiseBuf; ns.loop = true; nodes.push(ns);
+      const ng = gain(0.18 + rough * 0.35);
+      ns.connect(filt("bandpass", 1300, 0.9)).connect(ng).connect(am);
+      // Munnen: to formanter som glir, pluss bryst
+      const mix = gain(2);
+      const F1 = filt("bandpass", f1a, 5), F2 = filt("bandpass", f2a, 6);
+      F1.frequency.setValueAtTime(f1a, s); F1.frequency.linearRampToValueAtTime(f1b, s + dur * 0.6);
+      F2.frequency.setValueAtTime(f2a, s); F2.frequency.linearRampToValueAtTime(f2b, s + dur * 0.6);
+      am.connect(F1).connect(gain(2.2)).connect(mix);
+      am.connect(F2).connect(gain(1.3)).connect(mix);
+      am.connect(filt("lowpass", 240, 0.7)).connect(gain(0.7)).connect(mix);
+      const env = ac.createGain();
+      env.gain.setValueAtTime(0, s);
+      env.gain.linearRampToValueAtTime(vol, s + att);
+      env.gain.linearRampToValueAtTime(vol * 0.75, s + dur * 0.55);
+      env.gain.linearRampToValueAtTime(0, end);
+      let node = mix.connect(filt("lowpass", 2600, 0.7)).connect(env);
       if (ac.createStereoPanner) { const p = ac.createStereoPanner(); p.pan.value = pan || 0; node = node.connect(p); }
       node.connect(sfxBus);
-      o.start(s); o.stop(s + 2.4); vib.start(s); vib.stop(s + 2.4);
+      nodes.forEach(n => { n.start(s); n.stop(end + 0.05); });
+    }
+    function groan(s, base, vol, pan) {
+      zVoice(s, base, vol, pan, 1.6 + Math.random() * 1.1, 0.35 + Math.random() * 0.2, 300, 620, 820, 1150, 0.35);
+    }
+    function growl(s, base, vol, pan) {
+      zVoice(s, base, vol, pan, 0.55 + Math.random() * 0.35, 0.85, 560, 700, 1150, 1300, 0.04);
+    }
+    // Skudd: knall, smell, dunk og ekko. Hver våpentype har sin klang. vol og pan gir avstand og retning; far demper diskanten.
+    // [styrke, knallfrekvens, lengde på smellet, ekkohale, dunk]
+    const SHOT = { pistol: [1, 2800, 0.16, 0.5, 0.9], smg: [0.75, 3400, 0.1, 0.35, 0.7], rifle: [1.15, 2300, 0.22, 0.9, 1.1], lmg: [1.05, 2100, 0.2, 0.75, 1.05], shotgun: [1.35, 1200, 0.32, 1.1, 1.45], sniper: [1.45, 1900, 0.28, 1.6, 1.4] };
+    function shot(cls, vol, pan, far) {
+      const [pw, cf, bd, tail, low] = SHOT[cls] || SHOT.pistol, t = ac.currentTime + 0.01;
+      const out = ac.createGain(); out.gain.value = Math.min(1.1, vol * pw * 0.65);
+      let node = out;
+      if (far) { const lp = ac.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 1100; node = node.connect(lp); }
+      if (ac.createStereoPanner) { const p = ac.createStereoPanner(); p.pan.value = pan || 0; node = node.connect(p); }
+      node.connect(sfxBus);
+      const nz = (st, dur, f, v, type, q) => {
+        const src = ac.createBufferSource(); src.buffer = noiseBuf; src.playbackRate.value = 0.85 + Math.random() * 0.3;
+        const b = ac.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q;
+        const g = ac.createGain();
+        g.gain.setValueAtTime(0.0001, st); g.gain.exponentialRampToValueAtTime(v, st + 0.004); g.gain.exponentialRampToValueAtTime(0.0008, st + dur);
+        src.connect(b).connect(g).connect(out); src.start(st, Math.random()); src.stop(st + dur + 0.05);
+      };
+      // Knallet (kruttet og kula) og smellet i løpet
+      nz(t, 0.045, cf * 1.6, 1.0, "highpass", 0.7);
+      nz(t, bd, cf, 0.9, "bandpass", 1.1);
+      nz(t + 0.004, bd * 1.6, cf * 0.35, 0.7, "bandpass", 0.9);
+      // Dunket i brystet
+      const o = ac.createOscillator(); o.type = "sine";
+      o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(34, t + 0.22 * low);
+      const og = ac.createGain(); og.gain.setValueAtTime(0.0001, t); og.gain.exponentialRampToValueAtTime(0.95 * low, t + 0.006); og.gain.exponentialRampToValueAtTime(0.001, t + 0.3 * low);
+      o.connect(og).connect(out); o.start(t); o.stop(t + 0.32 * low);
+      // Ekkoet som ruller mellom husene og åsene
+      nz(t + 0.02, tail, 700, 0.32, "lowpass", 0.7);
+      nz(t + 0.16 + Math.random() * 0.1, tail * 0.8, 480, 0.15, "lowpass", 0.7);
+      nz(t + 0.4 + Math.random() * 0.2, tail * 0.7, 360, 0.07, "lowpass", 0.7);
+      // Mekanikken: sleiden på pistolen, pumpa på hagla
+      if (!far) {
+        if (cls === "shotgun") { nz(t + 0.42, 0.05, 2400, 0.2, "highpass", 1); nz(t + 0.58, 0.06, 1700, 0.25, "highpass", 1); }
+        else nz(t + 0.03, 0.03, 4800, 0.12, "highpass", 1);
+      }
     }
 
     // Vind: filtrert støy som sveiper sakte. Sterkere ute.
@@ -5304,6 +5369,10 @@ if (TW_LANG === "en") {
         o.connect(lp).connect(g).connect(sfxBus);
         o.start(t); o.stop(t + 3.8);
       },
+      // Skudd med klangen til våpentypen (pistol, smg, rifle, lmg, shotgun, sniper)
+      shot(cls, vol, pan, far) { if (ac) shot(cls, vol ?? 1, pan || 0, !!far); },
+      // Snerring: kort og grov, når en zombie er helt inntil eller biter
+      growlAt(vol, pan, ty) { if (ac) growl(ac.currentTime + 0.02, ty === 3 ? 48 + Math.random() * 12 : ty === 2 ? 62 + Math.random() * 14 : 72 + Math.random() * 30, vol, pan); },
       gunFar() {
         if (!ac) return;
         const t = ac.currentTime + 0.02;
@@ -5346,10 +5415,7 @@ if (TW_LANG === "en") {
       },
       gun() {
         if (!ac) return;
-        const t = ac.currentTime + 0.02;
-        thump(t, 1); thump(t + 0.01, 1);
-        burst(t, 0.5, 400, 0.9, "lowpass");
-        burst(t, 0.12, 3000, 0.5, "highpass");
+        shot("pistol", 1, 0, false);
       },
       scream() {
         if (!ac) return;
@@ -15283,6 +15349,13 @@ if (TW_LANG === "en") {
       });
       return best ? [best.x, best.ty === 3 ? 2.2 : best.ty === 5 ? 1.0 : best.ty === 7 ? 1.45 : 1.2, best.z] : [x + fx * 24, 1.3, z + fz * 24];
     }
+    // Et skudd et annet sted: hørbart 150 m unna, fra riktig side
+    function mpShotSnd(cls, x, z) {
+      const dx = x - pos.x, dz = z - pos.z, d = Math.hypot(dx, dz);
+      if (d > 150) return;
+      let rel = Math.atan2(-dx, -dz) - yaw; rel = Math.atan2(Math.sin(rel), Math.cos(rel));
+      Sound.shot(cls, Math.max(0.12, 0.9 - d / 120), -Math.sin(rel) * 0.85 * Math.min(1, d / 4), d > 35);
+    }
     function mpShoot() {
       MP.cool = MP.boost > 0 ? 0.2 : 0.35; MP.swing = 0.12; MP.ammo--; MP.aw = 1;
       Sound.gun(); shake = Math.max(shake, 0.12);
@@ -15294,7 +15367,7 @@ if (TW_LANG === "en") {
     // Hagle: tre hagl på 10 meter rundt trådkorset (verten ser det som skudd)
     function mpShotgun() {
       MP.cool = MP.boost > 0 ? 0.5 : 0.75; MP.swing = 0.12; MP.shells--; MP.aw = 4;
-      Sound.gun(); Sound.gunFar(); shake = Math.max(shake, 0.28);
+      Sound.shot("shotgun", 1, 0); shake = Math.max(shake, 0.28);
       if (MP.flash) MP.flash.intensity = 4;
       vmFire("shotgun");
       if (MP.shells <= 0) { MP.msg = _t("Tomt for patroner! Tilbake til ") + (MP.ammo > 0 ? _t("pistolen.") : _t("brekkjernet.")); MP.msgT = 2; }
@@ -15350,7 +15423,7 @@ if (TW_LANG === "en") {
       const sg = G.cls === "shotgun";
       MP.cool = G.cool * (MP.boost > 0 ? 0.6 : 1); MP.swing = 0.12; MP.aw = sg ? 4 : 1;
       if (sg) MP.shells--; else MP.ammo--;
-      Sound.gun(); if (sg || G.cls === "sniper") Sound.gunFar();
+      Sound.shot(G.cls, 1, 0);
       shake = Math.max(shake, GUN_SHAKE[G.cls]);
       vmGunFire(G);
       if ((sg ? MP.shells : MP.ammo) <= 0) { MP.msg = _T`Tomt for skudd til ${G.n}.`; MP.msgT = 2; }
@@ -15824,12 +15897,12 @@ if (TW_LANG === "en") {
         if (m.swq !== undefined && swq !== m.swq) {
           m.swT = wq === 1 || wq === 3 ? 0.15 : 0.32;
           if (wq === 3) {
-            m.fT = 0.09; const dd = Math.hypot(q.x - pos.x, q.z - pos.z); if (dd < 60) Sound.gunFar();
+            m.fT = 0.09; mpShotSnd("shotgun", q.x, q.z);
             const h = typeof q.y === "number" ? q.y : m.person.g.rotation.y, gx = m.person.g.position.x, gz = m.person.g.position.z;
             [-0.14, 0, 0.14].forEach(o => mpTracer(gx - Math.sin(h) * 0.5, 1.35, gz - Math.cos(h) * 0.5, gx - Math.sin(h + o) * 10, 1.3, gz - Math.cos(h + o) * 10));
           }
           if (wq === 1) {
-            m.fT = 0.07; const dd = Math.hypot(q.x - pos.x, q.z - pos.z); if (dd < 60) Sound.gunFar();
+            m.fT = 0.07; mpShotSnd("pistol", q.x, q.z);
             const h = typeof q.y === "number" ? q.y : m.person.g.rotation.y, gx = m.person.g.position.x, gz = m.person.g.position.z;
             const e = mpShotEnd(gx, gz, h);
             mpTracer(gx - Math.sin(h) * 0.5, q.d ? 0.35 : 1.35, gz - Math.cos(h) * 0.5, e[0], e[1], e[2]);
@@ -16230,13 +16303,15 @@ if (TW_LANG === "en") {
       // Stønn fra en tilfeldig zombie innen 18 m; oftere jo flere som er nær
       MP.groanT -= dt;
       if (MP.groanT <= 0 && MP.over <= 0) {
-        const nearZ = [...MP.zs.values()].filter(z => z.st === 0 && Math.hypot(z.x - pos.x, z.z - pos.z) < 18);
-        MP.groanT = nearZ.length ? Math.max(1.2, 5 - nearZ.length * 0.5) + Math.random() * 2 : 2;
+        const nearZ = [...MP.zs.values()].filter(z => z.st === 0 && Math.hypot(z.x - pos.x, z.z - pos.z) < 28);
+        MP.groanT = nearZ.length ? Math.max(0.8, 4.2 - nearZ.length * 0.5) + Math.random() * 1.6 : 2;
         if (nearZ.length) {
           const z = nearZ[Math.floor(Math.random() * nearZ.length)];
           const dx = z.x - pos.x, dz = z.z - pos.z, d = Math.hypot(dx, dz);
           let rel = Math.atan2(-dx, -dz) - yaw; rel = Math.atan2(Math.sin(rel), Math.cos(rel));
-          Sound.groanAt(0.24 * (1 - d / 18) + 0.03, -Math.sin(rel) * 0.9, z.ty === 3 ? 45 + Math.random() * 15 : z.ty === 2 ? 60 + Math.random() * 20 : undefined);
+          const v = 0.3 * (1 - d / 28) + 0.03, pn = -Math.sin(rel) * 0.9;
+          if (d < 6 && Math.random() < 0.6) Sound.growlAt(v * 1.2, pn, z.ty);
+          else Sound.groanAt(v, pn, z.ty === 3 ? 45 + Math.random() * 15 : z.ty === 2 ? 60 + Math.random() * 20 : undefined);
         }
       }
       MP.rpT = Math.max(0, MP.rpT - dt);
@@ -16532,6 +16607,7 @@ if (TW_LANG === "en") {
           if (biting) {
             MP.hp -= 16 * biting * mpBite() * dt;
             MP.hurt = 0.25;
+            if (near && performance.now() - (MP.biteSndAt || 0) > 900 + Math.random() * 600) { MP.biteSndAt = performance.now(); Sound.growlAt(0.34, -Math.sin(MP.dmgRel || 0) * 0.8, near.ty); }
             if (MP.hp <= 0) {
               MP.hp = 0; MP.down = true; MP.rv = 0; Sound.scream(); if (MP.ammo <= 0) releasePointer();
               if (near && players.length > 1) mpRevenge(near);
@@ -17515,7 +17591,7 @@ if (TW_LANG === "en") {
       ? _t("Joystick: gå · Dra på skjermen: se rundt · Slå-knappen: slå")
       : _t("WASD: gå · Shift: løp · Klikk i bildet for å styre med musa · Klikk eller F: slå · E: spark · B: barrikade · G: marker · R: granat · V: bluss · H: alle tastene"));
     Sound.setWind(true, 0.4);
-    Sound.setSirens(true);
+    Sound.setSirens(false);
     $("mp-help").hidden = true;
     if (!(load(MP_KEY) || {}).helpSeen) mpHelp(true);
     if (!mpNet) World.mpNotice((notice || _t("Flerspiller virker ikke her, så du spiller alene.")) + " " + mpWhyNot());
@@ -19990,7 +20066,7 @@ if (TW_LANG === "en") {
 
   // Versjonsnummer nede i høyre hjørne: hvitt når dette er den nyeste versjonen, rødt når det finnes en nyere på GitHub
   {
-    const TW_VER = 236;
+    const TW_VER = 237;
     const el = document.createElement("div");
     el.className = "twver"; el.id = "twver";
     el.textContent = _T`Versjon 0,${TW_VER}`;
