@@ -6758,6 +6758,7 @@ body {
 
     function render(t, dt) {
       if (!ok) return;
+      if (VM.built) vmTick(dt);
       if (mode3 === "explore" || mode3 === "escape" || mode3 === "chase" || mode3 === "gasIn" || mode3 === "cellarIn" || mode3 === "sneak" ||
           (mode3 === "fight" && FIGHT.hp > 0) || (mode3 === "defend" && K7.hp > 0) || (mode3 === "mp" && MP.over <= 0 && !MP.inCar && !MP.ride) ||
           (mode3 === "sb" && !SB.inCar && !SB.dead)) updateExplore(dt);
@@ -7489,18 +7490,246 @@ body {
       K2.flash = new T.PointLight(0xffc070, 0, 10, 2); scene3.add(K2.flash);
     }
 
+    // ---------- Våpen i hendene: modeller med hender, rekyl, munningsflamme og tomhylser (alle modusene) ----------
+    // Alle våpen henger i en rigg på kameraet, så gange-vugging og rekyl virker likt overalt.
+    // Retning: grepet er i origo, våpenet peker mot −z, og eggen på øks og kniv vender ned (dit hugget går).
+    const VM = { rig: null, built: false, kick: 0, bobT: 0, amp: 0, sway: 0, lx: null, lz: 0, ly: 0, models: {}, melee: {}, fists: null, shells: [], shellI: 0, pend: null };
+    function vmRig() { if (!VM.rig) { VM.rig = new THREE.Group(); camera.add(VM.rig); } return VM.rig; }
+    const vmMats = {};
+    function vmM(c, shine) {
+      const k = c + ":" + (shine || 0);
+      if (!vmMats[k]) vmMats[k] = shine ? new THREE.MeshPhongMaterial({ color: c, shininess: shine, specular: 0x5a5a5a }) : new THREE.MeshLambertMaterial({ color: c });
+      return vmMats[k];
+    }
+    function vmBox(g, w, h, d, c, x, y, z, shine) { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), vmM(c, shine)); m.position.set(x, y, z); g.add(m); return m; }
+    // Sylinder langs z: r0 er bakerste radius, r1 fremste
+    function vmCyl(g, r0, r1, len, c, x, y, z, seg, shine) { const m = new THREE.Mesh(new THREE.CylinderGeometry(r0, r1, len, seg || 10), vmM(c, shine)); m.rotation.x = Math.PI / 2; m.position.set(x, y, z); g.add(m); return m; }
+    // Flat form sett fra siden: punkter [d, y] der d er avstand fremover (mot −z), tykkelse i x
+    function vmShape(g, pts, depth, c, shine) {
+      const sh = new THREE.Shape(); pts.forEach(([d, y], i) => i ? sh.lineTo(d, y) : sh.moveTo(d, y));
+      const geo = new THREE.ExtrudeGeometry(sh, { depth, bevelEnabled: false });
+      geo.translate(0, 0, -depth / 2); geo.rotateY(Math.PI / 2);
+      const m = new THREE.Mesh(geo, vmM(c, shine)); g.add(m); return m;
+    }
+    const VM_GLOVE = 0x2b2622, VM_SLEEVE = 0x34402f;
+    // Hanske rundt grepet og ermet bakover mot deg
+    function vmHand(g, x, y, z, rx, len, ry, sc) {
+      const h = new THREE.Group(); h.position.set(x, y, z); h.rotation.set(rx || 0, ry || 0, 0); if (sc) h.scale.setScalar(sc);
+      const L = len || 0.32;
+      vmBox(h, 0.07, 0.078, 0.092, VM_GLOVE, 0, 0, 0);
+      vmBox(h, 0.024, 0.03, 0.05, VM_GLOVE, -0.042, 0.022, -0.022);
+      for (let i = 0; i < 4; i++) vmBox(h, 0.073, 0.004, 0.016, 0x1c1916, 0, 0.012 - i * 0.017, -0.047);
+      vmCyl(h, 0.047, 0.047, 0.04, 0x1d2219, 0, -0.008, 0.06, 10);
+      vmCyl(h, 0.055, 0.044, L, VM_SLEEVE, 0, -0.012, 0.08 + L / 2, 10);
+      g.add(h); return h;
+    }
+    function vmTrigger(g, y, z, c) {
+      const tg = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.004, 4, 12, Math.PI), vmM(c || 0x1b1c1f));
+      tg.rotation.set(0, Math.PI / 2, Math.PI); tg.position.set(0, y, z); g.add(tg);
+      vmBox(g, 0.006, 0.02, 0.006, 0x101010, 0, y + 0.006, z);
+    }
+    let VM_FLASH_TEX = null;
+    function vmFlash(g, at, size) {
+      if (!VM_FLASH_TEX) {
+        const c = document.createElement("canvas"); c.width = c.height = 64; const x = c.getContext("2d");
+        const gr = x.createRadialGradient(32, 32, 0, 32, 32, 30); gr.addColorStop(0, "rgba(255,255,230,1)"); gr.addColorStop(0.25, "rgba(255,200,90,0.9)"); gr.addColorStop(1, "rgba(255,120,20,0)");
+        x.fillStyle = gr; x.beginPath();
+        for (let i = 0; i < 16; i++) { const a = i / 16 * Math.PI * 2, r = i % 2 ? 9 : 31; x.lineTo(32 + Math.cos(a) * r, 32 + Math.sin(a) * r); }
+        x.fill(); VM_FLASH_TEX = new THREE.CanvasTexture(c);
+      }
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: VM_FLASH_TEX, color: 0xffe0a0, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+      sp.position.copy(at); sp.scale.setScalar(size); g.add(sp); g.userData.flash = sp; g.userData.fs = size;
+    }
+
+    function vmCrowbar() {
+      const g = new THREE.Group(), red = 0x8e1d15, steel = 0x51565c;
+      vmCyl(g, 0.014, 0.014, 0.6, red, 0, 0, -0.24, 6, 30);
+      const chisel = vmBox(g, 0.032, 0.007, 0.06, steel, 0, -0.004, 0.09, 50); chisel.rotation.x = 0.25;
+      // Svanehalsen i enden, med klo
+      const hook = new THREE.Mesh(new THREE.TorusGeometry(0.055, 0.014, 6, 12, Math.PI * 0.8), vmM(red, 30));
+      hook.rotation.y = Math.PI / 2; hook.position.set(0, 0, -0.485); g.add(hook);
+      [-0.009, 0.009].forEach(x => { const c = vmBox(g, 0.011, 0.008, 0.04, steel, x, 0.04, -0.43, 50); c.rotation.x = -0.9; });
+      vmHand(g, 0, 0, 0);
+      return g;
+    }
+    function vmAxe(fire) {
+      const g = new THREE.Group(), headC = fire ? 0xb3261c : 0x6f747a;
+      vmCyl(g, 0.02, 0.016, 0.74, fire ? 0xd8b030 : 0x8a5c32, 0, 0, -0.29, 8, fire ? 40 : 0);
+      vmShape(g, [[0.59, 0.05], [0.675, 0.05], [0.675, -0.01], [0.69, -0.06], [0.715, -0.11], [0.735, -0.155], [0.69, -0.162], [0.635, -0.165], [0.58, -0.162], [0.54, -0.155], [0.565, -0.11], [0.585, -0.06], [0.59, -0.01]], 0.034, headC, 50);
+      vmShape(g, [[0.735, -0.155], [0.69, -0.162], [0.635, -0.165], [0.58, -0.162], [0.54, -0.155], [0.545, -0.142], [0.585, -0.148], [0.635, -0.151], [0.685, -0.148], [0.727, -0.142]], 0.036, 0xd9dde0, 90);
+      if (fire) { const sp = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.12, 6), vmM(headC, 50)); sp.position.set(0, 0.11, -0.632); g.add(sp); }
+      vmHand(g, 0, 0, 0);
+      return g;
+    }
+    function vmKnife() {
+      const g = new THREE.Group();
+      vmBox(g, 0.026, 0.032, 0.12, 0x1c1c1e, 0, -0.002, -0.01);
+      vmBox(g, 0.05, 0.014, 0.012, 0x6a6e72, 0, -0.002, -0.075, 60);
+      vmShape(g, [[0.08, 0.012], [0.27, 0.012], [0.3, 0.004], [0.28, -0.008], [0.24, -0.016], [0.08, -0.016]], 0.004, 0xc9cdd0, 90);
+      vmHand(g, 0, -0.004, 0);
+      return g;
+    }
+    function vmKolle() {
+      const g = new THREE.Group(), wood = 0xb88a4a;
+      vmCyl(g, 0.017, 0.015, 0.78, wood, 0, 0, -0.27, 8);
+      vmCyl(g, 0.0195, 0.0195, 0.2, 0x151515, 0, 0, 0, 8);
+      vmShape(g, [[0.64, 0.012], [0.7, 0.0], [0.76, -0.03], [0.82, -0.055], [0.86, -0.06], [0.86, -0.03], [0.81, -0.02], [0.75, 0.006], [0.7, 0.025], [0.64, 0.03]], 0.022, wood);
+      vmShape(g, [[0.76, -0.03], [0.82, -0.055], [0.86, -0.06], [0.86, -0.03], [0.81, -0.02], [0.77, -0.008]], 0.024, 0xeeeeee);
+      vmHand(g, 0, 0, 0);
+      return g;
+    }
+    // Pistol (henger i en gruppe som er skalert ned til 0,6)
+    function vmPistol() {
+      const g = new THREE.Group(), slideC = 0x2b2e33, frameC = 0x1b1c1f;
+      const slide = new THREE.Group(); g.add(slide);
+      vmBox(slide, 0.046, 0.044, 0.23, slideC, 0, 0.03, -0.085, 40);
+      for (let i = 0; i < 5; i++) vmBox(slide, 0.048, 0.03, 0.004, 0x17191c, 0, 0.03, 0.005 - i * 0.009);
+      vmBox(slide, 0.004, 0.018, 0.05, 0x0d0d0d, 0.023, 0.042, -0.07);
+      vmBox(slide, 0.008, 0.01, 0.01, 0x111111, 0, 0.057, -0.19);
+      [-0.012, 0.012].forEach(x => vmBox(slide, 0.008, 0.01, 0.01, 0x111111, x, 0.057, 0.018));
+      vmCyl(g, 0.011, 0.011, 0.012, 0x050505, 0, 0.03, -0.199, 10);
+      vmBox(g, 0.04, 0.026, 0.2, frameC, 0, -0.004, -0.08);
+      vmBox(g, 0.042, 0.008, 0.07, frameC, 0, -0.021, -0.15);
+      const grip = vmBox(g, 0.042, 0.13, 0.058, frameC, 0, -0.075, 0.03); grip.rotation.x = 0.28;
+      for (let i = 0; i < 4; i++) { const r = vmBox(g, 0.044, 0.004, 0.05, 0x101113, 0, -0.045 - i * 0.022, 0.037 + i * 0.006); r.rotation.x = 0.28; }
+      const mag = vmBox(g, 0.044, 0.012, 0.064, 0x0c0c0c, 0, -0.142, 0.05); mag.rotation.x = 0.28;
+      vmTrigger(g, -0.02, -0.045, frameC);
+      vmHand(g, 0, -0.07, 0.035, 0.28, 0.3, 0, 1.55);
+      g.userData = { slide, muzzle: new THREE.Vector3(0, 0.03, -0.215), port: new THREE.Vector3(0.03, 0.045, -0.07), shell: "pistol" };
+      vmFlash(g, g.userData.muzzle, 0.22);
+      return g;
+    }
+    function vmShotgun() {
+      const g = new THREE.Group(), metal = 0x26282c, wood = 0x6b4426;
+      vmCyl(g, 0.013, 0.013, 0.62, metal, 0, 0.022, -0.43, 10, 40);
+      vmCyl(g, 0.011, 0.011, 0.5, metal, 0, -0.008, -0.38, 10, 40);
+      const pump = new THREE.Group(); g.add(pump);
+      vmCyl(pump, 0.024, 0.024, 0.17, wood, 0, -0.004, -0.36, 10);
+      for (let i = 0; i < 4; i++) vmCyl(pump, 0.0245, 0.0245, 0.006, 0x3a2414, 0, -0.004, -0.3 - i * 0.04, 10);
+      vmHand(pump, -0.012, -0.04, -0.36, 1.0, 0.36, -0.45);
+      vmBox(g, 0.044, 0.062, 0.22, metal, 0, 0.012, -0.06, 30);
+      vmBox(g, 0.004, 0.02, 0.05, 0x0d0d0d, 0.023, 0.022, -0.05);
+      vmCyl(g, 0.016, 0.016, 0.01, 0x050505, 0, 0.022, -0.745, 10);
+      vmBox(g, 0.006, 0.008, 0.01, 0xd0d0d0, 0, 0.039, -0.73, 80);
+      vmShape(g, [[-0.05, 0.03], [-0.05, -0.02], [-0.09, -0.07], [-0.13, -0.085], [-0.38, -0.12], [-0.38, 0.03], [-0.12, 0.035]], 0.04, wood);
+      vmBox(g, 0.042, 0.15, 0.012, 0x151515, 0, -0.045, 0.385);
+      vmTrigger(g, -0.022, -0.03, metal);
+      vmHand(g, 0, -0.05, 0.035, 0.6, 0.3);
+      g.position.set(0.2, -0.23, -0.33); g.rotation.y = 0.04; g.visible = false;
+      g.userData = { pump, muzzle: new THREE.Vector3(0, 0.022, -0.76), port: new THREE.Vector3(0.03, 0.025, -0.05), shell: "shotgun", delay: 0.28 };
+      vmFlash(g, g.userData.muzzle, 0.42);
+      return g;
+    }
+    function vmRifle() {
+      const g = new THREE.Group(), metal = 0x23262a, wood = 0x7a4f2a, scope = 0x15171a;
+      vmCyl(g, 0.012, 0.009, 0.62, metal, 0, 0.03, -0.47, 10, 50);
+      vmBox(g, 0.04, 0.045, 0.22, metal, 0, 0.022, -0.07, 40);
+      vmShape(g, [[0.6, 0.012], [0.6, -0.012], [0.2, -0.035], [0.05, -0.04], [0.0, -0.03], [-0.04, -0.06], [-0.1, -0.09], [-0.4, -0.13], [-0.4, 0.03], [-0.12, 0.03], [-0.05, 0.01], [0.2, 0.012]], 0.042, wood);
+      vmBox(g, 0.044, 0.165, 0.012, 0x151515, 0, -0.05, 0.405);
+      vmCyl(g, 0.016, 0.016, 0.2, scope, 0, 0.088, -0.08, 12, 60);
+      vmCyl(g, 0.02, 0.025, 0.06, scope, 0, 0.088, -0.205, 12, 60);
+      vmCyl(g, 0.022, 0.019, 0.05, scope, 0, 0.088, 0.04, 12, 60);
+      vmCyl(g, 0.021, 0.021, 0.003, 0x5f9fc0, 0, 0.088, -0.237, 12, 90);
+      [-0.13, -0.025].forEach(z => vmBox(g, 0.012, 0.04, 0.014, metal, 0, 0.06, z));
+      const bolt = new THREE.Group(); bolt.position.set(0.022, 0.03, 0); g.add(bolt);
+      const bh = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.06, 6), vmM(metal, 50)); bh.rotation.z = -1.2; bh.position.set(0.026, -0.01, 0); bolt.add(bh);
+      const knob = new THREE.Mesh(new THREE.SphereGeometry(0.011, 8, 6), vmM(metal, 50)); knob.position.set(0.052, -0.022, 0); bolt.add(knob);
+      vmTrigger(g, -0.028, -0.02, metal);
+      vmHand(g, 0, -0.055, 0.05, 0.55, 0.3);
+      vmHand(g, -0.006, -0.035, -0.36, 1.0, 0.36, -0.45);
+      g.position.set(0.2, -0.24, -0.35); g.rotation.y = 0.03; g.visible = false;
+      g.userData = { bolt, muzzle: new THREE.Vector3(0, 0.03, -0.8), port: new THREE.Vector3(0.03, 0.04, -0.05), shell: "rifle", delay: 0.3 };
+      vmFlash(g, g.userData.muzzle, 0.38);
+      return g;
+    }
+    function vmFistsBuild() {
+      const g = new THREE.Group();
+      const r = new THREE.Group(); r.position.set(0.22, -0.24, -0.4); r.rotation.set(0.15, -0.1, 0); vmHand(r, 0, 0, 0, 0, 0.4); g.add(r);
+      const l = new THREE.Group(); l.position.set(-0.24, -0.27, -0.44); l.rotation.set(0.25, 0.15, 0); vmHand(l, 0, 0, 0, 0, 0.4); g.add(l);
+      g.userData = { r, l }; g.visible = false;
+      return g;
+    }
+    function vmBuildAll() {
+      if (VM.built) return;
+      VM.built = true;
+      const rig = vmRig();
+      VM.models.shotgun = vmShotgun(); rig.add(VM.models.shotgun);
+      VM.models.rifle = vmRifle(); rig.add(VM.models.rifle);
+      VM.fists = vmFistsBuild(); rig.add(VM.fists);
+      const brass = vmM(0xc8a040, 70), red = vmM(0xa8201a, 20);
+      const geo = { pistol: new THREE.CylinderGeometry(0.0045, 0.0045, 0.018, 6), rifle: new THREE.CylinderGeometry(0.006, 0.006, 0.05, 6), shotgun: new THREE.CylinderGeometry(0.011, 0.011, 0.045, 8) };
+      for (let i = 0; i < 10; i++) { const m = new THREE.Mesh(geo.pistol, brass); m.visible = false; rig.add(m); VM.shells.push({ m, life: 0, v: new THREE.Vector3(), spin: 0 }); }
+      VM.shellGeo = geo; VM.shellMat = { pistol: brass, rifle: brass, shotgun: red };
+    }
+    // Bare ett nærkampvåpen i hånda om gangen
+    function vmMelee(k) { for (const key in VM.melee) VM.melee[key].visible = key === k; }
+    function vmToRig(obj, v) { const p = v.clone(); let o = obj; while (o && o !== VM.rig) { o.updateMatrix(); p.applyMatrix4(o.matrix); o = o.parent; } return p; }
+    function vmShell(m) {
+      const u = m.userData, s = VM.shells[VM.shellI++ % VM.shells.length];
+      s.m.geometry = VM.shellGeo[u.shell]; s.m.material = VM.shellMat[u.shell];
+      s.m.position.copy(vmToRig(m, u.port)); s.m.rotation.set(Math.random() * 3, 0, Math.PI / 2);
+      s.v.set(0.7 + Math.random() * 0.4, 0.8 + Math.random() * 0.4, 0.15 + Math.random() * 0.2); s.spin = 14 + Math.random() * 10; s.life = 0.7; s.m.visible = true;
+    }
+    // Et skudd: rekyl, munningsflamme, sleden/pumpa/sluttstykket går, og hylsa flyr ut
+    function vmFire(kind) {
+      const m = VM.models[kind];
+      VM.kick = kind === "pistol" ? 0.55 : 1;
+      if (!m) return;
+      const u = m.userData;
+      if (u.flash) { u.flash.material.opacity = 1; u.flash.material.rotation = Math.random() * 6.28; u.flash.scale.setScalar(u.fs * (0.8 + Math.random() * 0.4)); }
+      u.t = 0;
+      VM.pend = { m, at: u.delay || 0 };
+    }
+    function vmTick(dt) {
+      const rig = vmRig();
+      if (VM.lx === null) { VM.lx = pos.x; VM.lz = pos.z; VM.ly = yaw; }
+      const sp = Math.hypot(pos.x - VM.lx, pos.z - VM.lz) / Math.max(dt, 0.001);
+      let dy = yaw - VM.ly; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      VM.lx = pos.x; VM.lz = pos.z; VM.ly = yaw;
+      const walk = sp > 0.4 && sp < 9 ? Math.min(1, sp / 4.5) : 0;
+      VM.amp += (walk - VM.amp) * Math.min(1, dt * 6);
+      VM.bobT += dt * (5 + Math.min(9, sp) * 1.1) * (VM.amp > 0.02 ? 1 : 0);
+      const swayT = Math.max(-0.07, Math.min(0.07, dy / Math.max(dt, 0.001) * 0.02));
+      VM.sway += (swayT - VM.sway) * Math.min(1, dt * 8);
+      VM.kick = Math.max(0, VM.kick - dt * 6);
+      const k = VM.kick * VM.kick;
+      rig.position.set(Math.sin(VM.bobT) * 0.011 * VM.amp + VM.sway * 0.25, -Math.abs(Math.cos(VM.bobT)) * 0.013 * VM.amp + k * 0.012, k * 0.06);
+      rig.rotation.set(k * 0.17, VM.sway, -VM.sway * 0.5);
+      for (const key in VM.models) {
+        const u = VM.models[key].userData;
+        if (u.flash) u.flash.material.opacity = Math.max(0, u.flash.material.opacity - dt * 20);
+        if (u.t === undefined || u.t > 1) continue;
+        u.t += dt; const t = u.t;
+        if (u.slide) u.slide.position.z = t < 0.03 ? t / 0.03 * 0.04 : Math.max(0, 0.04 - (t - 0.03) * 0.45);
+        if (u.pump) u.pump.position.z = (t < 0.16 ? 0 : t < 0.3 ? (t - 0.16) / 0.14 : t < 0.44 ? 1 - (t - 0.3) / 0.14 : 0) * 0.09;
+        if (u.bolt) {
+          const lift = t < 0.18 ? 0 : t < 0.26 ? (t - 0.18) / 0.08 : t < 0.56 ? 1 : t < 0.64 ? 1 - (t - 0.56) / 0.08 : 0;
+          const back = t < 0.26 ? 0 : t < 0.36 ? (t - 0.26) / 0.1 : t < 0.46 ? 1 : t < 0.56 ? 1 - (t - 0.46) / 0.1 : 0;
+          u.bolt.rotation.z = lift * 1.1; u.bolt.position.z = back * 0.07;
+        }
+      }
+      if (VM.pend) { VM.pend.at -= dt; if (VM.pend.at <= 0) { vmShell(VM.pend.m); VM.pend = null; } }
+      VM.shells.forEach(s => {
+        if (s.life <= 0) return;
+        s.life -= dt; s.v.y -= 5 * dt;
+        s.m.position.addScaledVector(s.v, dt); s.m.rotation.x += s.spin * dt;
+        if (s.life <= 0) s.m.visible = false;
+      });
+      // Våpen som hører til en annen modus, gjemmes (modusen selv viser sitt eget etterpå)
+      if (mode3 !== "mp") VM.models.shotgun.visible = false;
+      if (mode3 !== "sb" && mode3 !== "defend") VM.models.rifle.visible = false;
+      if (mode3 !== "sb") VM.fists.visible = false;
+    }
+
     function axeAssets() {
       if (axeFP) return;
       const T = THREE;
-      axeFP = new T.Group();
-      const handle = new T.Mesh(new T.BoxGeometry(0.04, 0.04, 0.7), new T.MeshLambertMaterial({ color: 0x7a5530 }));
-      handle.position.z = -0.3; axeFP.add(handle);
-      const head = new T.Mesh(new T.BoxGeometry(0.035, 0.2, 0.13), new T.MeshLambertMaterial({ color: 0x8a8680 }));
-      head.position.set(0, 0.06, -0.64); axeFP.add(head);
+      vmBuildAll();
+      axeFP = new T.Group(); axeFP.add(vmAxe(false));
       axeFP.position.set(0.32, -0.32, -0.45);
       axeFP.rotation.set(0.5, -0.2, 0);
       axeFP.visible = false;
-      camera.add(axeFP);
+      vmRig().add(axeFP);
     }
 
     // Mannen på stigen, og de tre i butikken
@@ -8228,12 +8457,8 @@ body {
       K5.base.add(cross);
       K7.redCross = cross;
       // Gevær i hendene (bare hvis Haugen ga deg et)
-      gunFP = new T.Group();
-      const stock = new T.Mesh(new T.BoxGeometry(0.06, 0.1, 0.35), lam(0x6b4a2a)); stock.position.z = 0.05; gunFP.add(stock);
-      const barrel = new T.Mesh(new T.BoxGeometry(0.04, 0.05, 0.6), lam(0x2a2c2e)); barrel.position.set(0, 0.03, -0.42); gunFP.add(barrel);
-      gunFP.position.set(0.22, -0.26, -0.4);
-      gunFP.visible = false;
-      camera.add(gunFP);
+      vmBuildAll();
+      gunFP = VM.models.rifle;
     }
 
     // Kamerapunkter i basen om natta (avhenger av hvor basen står)
@@ -10064,7 +10289,7 @@ body {
       const W = DEF_WEAPONS[K7.weapon];
       if (W.gun && K7.ammo <= 0) { if (cb.say) cb.say("", "Tomt for patroner! Bruk kolben."); K7.weapon = "brekkjern"; return; }
       K7.cool = W.cool; K7.swing = 0.3;
-      if (W.gun) { K7.ammo--; Sound.gun(); shake = 0.25; } else Sound.swing();
+      if (W.gun) { K7.ammo--; Sound.gun(); shake = 0.25; vmFire("rifle"); } else Sound.swing();
       const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
       let target = null, bd = W.range;
       K7.zs.forEach(z => {
@@ -10127,7 +10352,7 @@ body {
       // Øks eller brekkjern i hånda, med samme slag
       const sw = K7.swing > 0 ? Math.sin((1 - K7.swing / 0.3) * Math.PI) : 0;
       if (axeFP) { axeFP.visible = K7.weapon === "oks"; axeFP.rotation.set(0.5 - sw * 1.7, -0.2 + sw * 0.5, sw * 0.5); }
-      if (MP.weapon) { MP.weapon.visible = K7.weapon === "brekkjern"; MP.weapon.rotation.set(0.5 - sw * 1.6, -0.2 + sw * 0.5, sw * 0.4); }
+      if (MP.weapon) { vmMelee("brekkjern"); MP.weapon.visible = K7.weapon === "brekkjern"; MP.weapon.rotation.set(0.5 - sw * 1.6, -0.2 + sw * 0.5, sw * 0.4); }
       if (gunFP && W.gun) gunFP.rotation.x = K7.swing > 0 ? 0.15 : 0;
       const downed = K7.zs.filter(z => z.dead).length;
       K7.hudT += dt;
@@ -10565,7 +10790,7 @@ body {
         SB.cool = W.cool;
         SB.alertT = 8; // smellet trekker til seg zombier
         shake = 0.3;
-        Sound.gun();
+        Sound.gun(); vmFire("rifle");
       } else {
         SB.cool = W.cool; SB.swing = 0.3;
         Sound.swing();
@@ -10712,11 +10937,14 @@ body {
       SB.swing = Math.max(0, SB.swing - dt);
       SB.hurt = Math.max(0, SB.hurt - dt);
       if (MP.weapon) {
-        const melee = !WEAPONS[SB.weapon].gun && SB.weapon !== "hender";
-        MP.weapon.visible = !SB.inCar && !SB.dead && (melee || WEAPONS[SB.weapon].gun);
+        const gun = !!WEAPONS[SB.weapon].gun, can = !SB.inCar && !SB.dead;
+        MP.weapon.visible = can && !gun && SB.weapon !== "hender";
+        vmMelee(SB.weapon === "kniv" ? "kniv" : SB.weapon === "kolle" ? "kolle" : SB.weapon === "oks" ? "oks" : "brekkjern");
         const s = SB.swing > 0 ? Math.sin((1 - SB.swing / 0.3) * Math.PI) : 0;
-        if (WEAPONS[SB.weapon].gun) MP.weapon.rotation.set(-0.05 + shake * 0.4, 0, 0);
-        else MP.weapon.rotation.set(0.5 - s * 1.6, -0.2 + s * 0.5, s * 0.4);
+        MP.weapon.rotation.set(0.5 - s * 1.6, -0.2 + s * 0.5, s * 0.4);
+        VM.models.rifle.visible = can && gun;
+        VM.fists.visible = can && SB.weapon === "hender";
+        VM.fists.userData.r.position.set(0.22 - s * 0.08, -0.24 + s * 0.08, -0.4 - s * 0.24);
       }
       if (SB.hp <= 0 && !SB.dead) {
         SB.hp = 0; SB.dead = true; SB.search = null;
@@ -10863,27 +11091,17 @@ body {
         const b = new T.Mesh(new T.SphereGeometry(0.16, 10, 8), slimeM); b.visible = false; scene3.add(b);
         MP.spitModels.push(b);
       }
-      // Brekkjern i høyre hånd
+      // Nærkampvåpen i høyre hånd: brekkjern, øks, brannøks, kniv og bandykølle (bare ett vises om gangen)
+      vmBuildAll();
       const w = new T.Group();
-      const metal = new T.MeshLambertMaterial({ color: 0x4a5056 });
-      const bar = new T.Mesh(new T.BoxGeometry(0.035, 0.035, 0.75), metal);
-      bar.position.z = -0.3;
-      w.add(bar);
-      const hook = new T.Mesh(new T.BoxGeometry(0.035, 0.12, 0.035), metal);
-      hook.position.set(0, 0.05, -0.68);
-      w.add(hook);
-      const grip = new T.Mesh(new T.BoxGeometry(0.06, 0.06, 0.16), new T.MeshLambertMaterial({ color: 0x8a1f16 }));
-      grip.position.z = 0.02;
-      w.add(grip);
+      VM.melee = { brekkjern: vmCrowbar(), oks: vmAxe(false), brannoks: vmAxe(true), kniv: vmKnife(), kolle: vmKolle() };
+      for (const k in VM.melee) { VM.melee[k].visible = k === "brekkjern"; w.add(VM.melee[k]); }
       w.position.set(0.3, -0.3, -0.45);
       w.rotation.set(0.5, -0.2, 0);
       w.visible = false;
-      camera.add(w);
+      vmRig().add(w);
       MP.weapon = w;
-      const ah = new T.Group();
-      const blade = new T.Mesh(new T.BoxGeometry(0.03, 0.17, 0.2), new T.MeshLambertMaterial({ color: 0xb3261c })); blade.position.set(0, 0.06, -0.62); ah.add(blade);
-      const edge = new T.Mesh(new T.BoxGeometry(0.032, 0.17, 0.03), new T.MeshLambertMaterial({ color: 0xd8dcdc })); edge.position.set(0, 0.06, -0.735); ah.add(edge);
-      ah.visible = false; w.add(ah); MP.axeHead = ah;
+      const ah = new T.Group(); ah.visible = false; w.add(ah); MP.axeHead = ah;
       for (let i = 0; i < 8; i++) {
         const g = new T.Group(), wood = new T.MeshLambertMaterial({ color: 0x7a5a3a });
         [-1.1, 1.1].forEach(x => { const p = new T.Mesh(new T.BoxGeometry(0.14, 1.3, 0.14), wood); p.position.set(x, 0.65, 0); g.add(p); });
@@ -10924,12 +11142,11 @@ body {
         g.visible = false; scene3.add(g);
         MP.barrels.push({ g, fire, light, x: 0, z: 0, circle: null });
       }
-      const pg = new T.Group(), gunM = new T.MeshLambertMaterial({ color: 0x2a2c30 });
-      const slide = new T.Mesh(new T.BoxGeometry(0.045, 0.05, 0.22), gunM); slide.position.z = -0.08; pg.add(slide);
-      const handle = new T.Mesh(new T.BoxGeometry(0.04, 0.11, 0.05), new T.MeshLambertMaterial({ color: 0x3a2a1e })); handle.position.set(0, -0.07, 0.01); handle.rotation.x = 0.25; pg.add(handle);
+      const pg = new T.Group();
+      VM.models.pistol = vmPistol(); pg.add(VM.models.pistol);
       MP.flash = new T.PointLight(0xffd080, 0, 6, 2); MP.flash.position.set(0, 0.02, -0.25); pg.add(MP.flash);
       pg.position.set(0.15, -0.16, -0.4); pg.scale.setScalar(0.6); pg.rotation.y = 0.06; pg.visible = false;
-      camera.add(pg); MP.pistol = pg;
+      vmRig().add(pg); MP.pistol = pg;
       for (let i = 0; i < 6; i++) {
         const g = new T.Group();
         const body = new T.Mesh(new T.BoxGeometry(0.55, 0.38, 0.4), new T.MeshLambertMaterial({ color: 0xe8e4dc, emissive: 0x333333 }));
@@ -12014,6 +12231,7 @@ body {
       MP.cool = MP.boost > 0 ? 0.2 : 0.35; MP.swing = 0.12; MP.ammo--; MP.aw = 1;
       Sound.gun(); shake = Math.max(shake, 0.12);
       if (MP.flash) MP.flash.intensity = 3;
+      vmFire("pistol");
       const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
       let target = null, bd = 24;
       MP.zs.forEach(z => {
@@ -12042,6 +12260,7 @@ body {
       MP.cool = MP.boost > 0 ? 0.5 : 0.75; MP.swing = 0.12; MP.shells--; MP.aw = 4;
       Sound.gun(); Sound.gunFar(); shake = Math.max(shake, 0.28);
       if (MP.flash) MP.flash.intensity = 4;
+      vmFire("shotgun");
       const fx = -Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw);
       const hits = [];
       MP.zs.forEach(z => {
@@ -12866,7 +13085,7 @@ body {
       if (MP.tired && MP.stam >= 35) MP.tired = false;
       MP.running = false;
       MP.axe = Math.max(0, MP.axe - dt);
-      if (MP.axeHead) MP.axeHead.visible = MP.axe > 0 || !!MP.oks;
+      if (MP.axeHead) vmMelee(MP.axe > 0 ? "brannoks" : MP.oks ? "oks" : "brekkjern");
       MP.dmgT = Math.max(0, MP.dmgT - dt);
       MP.feed.forEach(f => { f.age += dt; });
       MP.feed = MP.feed.filter(f => f.age < 7).slice(-5);
@@ -13200,8 +13419,10 @@ body {
         MP.weapon.rotation.set(0.5 - s * 1.6 + kk * 0.6, -0.2 + s * 0.5, s * 0.4);
         MP.weapon.visible = !MP.down && !MP.inCar && MP.ammo <= 0 && MP.shells <= 0;
         if (MP.pistol) {
-          MP.pistol.visible = MP.inCar ? false : MP.down ? MP.ammo > 0 && !MP.specPeer : MP.ammo > 0 || MP.shells > 0;
-          MP.pistol.scale.set(1, MP.shells > 0 ? 0.9 : 1, MP.shells > 0 ? 1.55 : 1);
+          const gunVis = MP.inCar ? false : MP.down ? MP.ammo > 0 && !MP.specPeer : MP.ammo > 0 || MP.shells > 0;
+          const sg = MP.shells > 0 && !MP.down;
+          MP.pistol.visible = gunVis && !sg;
+          VM.models.shotgun.visible = gunVis && sg;
           const rk = (MP.aw === 1 || MP.aw === 4) && MP.swing > 0 ? MP.swing / 0.12 * (MP.aw === 4 ? 1.6 : 1) : 0;
           MP.pistol.rotation.x = rk * 0.35; MP.pistol.position.z = -0.4 + rk * 0.03;
           MP.flash.intensity = Math.max(0, MP.flash.intensity - dt * 30);
