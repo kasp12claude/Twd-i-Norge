@@ -1359,7 +1359,7 @@ body {
 
   <div class="cheat" id="cheat" role="dialog" aria-labelledby="cheat-h" hidden>
     <h4 id="cheat-h">Juksekode</h4>
-    <input type="text" id="cheat-in" inputmode="numeric" maxlength="4" autocomplete="off" spellcheck="false" placeholder="0000" aria-describedby="cheat-msg">
+    <input type="text" id="cheat-in" inputmode="numeric" maxlength="4" autocomplete="off" spellcheck="false" placeholder="····" aria-describedby="cheat-msg">
     <p id="cheat-msg">Skriv fire sifre og trykk Enter. Esc lukker.</p>
   </div>
   <div id="sbhud" hidden>
@@ -11211,7 +11211,7 @@ body {
         // Granater og bluss
         "6666": () => { if (!mp) return "Granater og bluss finnes bare i flerspiller."; MP.nades = 6; MP.flares = 3; return "Seks granater og tre lokkebluss!"; },
         // Udødelig (av og på)
-        "7777": () => { if (mp) { MP.god = !MP.god; return MP.god ? "Udødelig! Zombiene klarer ikke å skade deg. 7777 igjen slår det av." : "Udødelig er av."; } SB.god = !SB.god; return SB.god ? "Udødelig! Zombiene klarer ikke å skade deg. 7777 igjen slår det av." : "Udødelig er av."; },
+        "7777": () => { if (mp) { MP.god = !MP.god; return MP.god ? "Udødelig! Zombiene klarer ikke å skade deg." : "Udødelig er av."; } SB.god = !SB.god; return SB.god ? "Udødelig! Zombiene klarer ikke å skade deg." : "Udødelig er av."; },
         // Alt på en gang
         "9999": () => { ["1111", "2222", "3333", "4444", "5555"].forEach(k => C[k]()); if (mp) { MP.nades = 6; MP.flares = 3; } return "Alt sammen! Alle våpen, masse skudd, full helse, mat, drikke og bensin."; },
         // Slå av juks
