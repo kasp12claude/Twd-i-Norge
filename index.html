@@ -13921,11 +13921,148 @@ body {
   // ---------- Flerspiller: lobby, rom og skjermvisning ----------
   const MP_KEY = "twd-norge-mp";
   let roomNS = null, roomChecked = false, mpNet = null, mpStarting = false, mpRoomCode = "";
+  // Utenfor Claude (for eksempel på GitHub): flerspiller via PeerJS, som kobler nettleserne direkte til hverandre.
+  // Den første med koden tar adressen «twdnorge-<rom>» og blir knutepunkt: alle sender presence dit, og knutepunktet
+  // sender den videre til de andre. Samme grensesnitt som Claude-rommet: join(navn) → { presence, peers, leave }.
+  // Går knutepunktet, tar en av de andre over adressen, og resten kobler seg til på nytt.
+  function mpLoadPeer() {
+    if (window.Peer) return Promise.resolve(window.Peer);
+    return new Promise(res => {
+      const sc = document.createElement("script");
+      sc.src = "https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js";
+      const done = () => res(window.Peer || null);
+      sc.onload = done; sc.onerror = () => res(null);
+      setTimeout(done, 9000);
+      document.head.append(sc);
+    });
+  }
+  function mpPeerRooms(PeerCls) {
+    return {
+      peerjs: true,
+      join(name, opts) {
+        const peek = !!(opts && opts.peek);
+        const hubId = "twdnorge-" + String(name).toLowerCase().replace(/[^a-z0-9-]/g, "");
+        const st = { me: null, id: "", hub: false, conns: new Map(), up: null, mine: {}, others: new Map(), left: false, snap: null, tries: 0, seen: new Map(), prune: 0 };
+        const send = (c, m) => { try { if (c && c.open) c.send(m); } catch (e) {} };
+        const setP = (id, p) => { if (p && typeof p === "object") st.others.set(id, p); else st.others.delete(id); st.snap = null; };
+        const kill = () => { try { if (st.me) st.me.destroy(); } catch (e) {} st.me = null; st.up = null; st.conns.clear(); };
+        // Knutepunkt: ta imot nye, del alles presence
+        function hubAccept(c) {
+          c.on("open", () => {
+            st.conns.set(c.peer, c);
+            send(c, { t: "all", ps: [[st.id, st.mine], ...st.others] });
+          });
+          c.on("data", m => {
+            if (!m) return;
+            st.seen.set(c.peer, Date.now());
+            if (m.t === "bye") { gone(); try { c.close(); } catch (e) {} return; }
+            if (m.t !== "p" || !m.p || typeof m.p !== "object" || !Object.keys(m.p).length) return;
+            setP(c.peer, m.p);
+            st.conns.forEach((o, id) => { if (id !== c.peer) send(o, { t: "p", id: c.peer, p: m.p }); });
+          });
+          function gone() {
+            if (!st.conns.has(c.peer)) return;
+            st.conns.delete(c.peer); st.seen.delete(c.peer); setP(c.peer, null);
+            st.conns.forEach(o => send(o, { t: "x", id: c.peer }));
+          }
+          c.on("close", gone); c.on("error", gone);
+        }
+        // Prøv å bli knutepunkt; er adressen tatt, koble til den som har den
+        function start(ready, fail) {
+          if (st.left) return;
+          if (peek) { asClient(ready, fail); return; }
+          const p = new PeerCls(hubId); st.me = p;
+          p.on("open", id => {
+            st.id = id; st.hub = true; st.others.clear(); st.snap = null; p.on("connection", hubAccept); ready();
+            // Noen som lukket fanen uten å si fra: ut etter 15 sekunder uten noe fra dem
+            clearInterval(st.prune);
+            st.prune = setInterval(() => {
+              if (st.left || st.me !== p) { clearInterval(st.prune); return; }
+              const now = Date.now();
+              st.conns.forEach((c, cid) => { if (now - (st.seen.get(cid) || now) > 15000) { try { c.close(); } catch (e) {} st.conns.delete(cid); st.seen.delete(cid); setP(cid, null); st.conns.forEach(o => send(o, { t: "x", id: cid })); } });
+            }, 5000);
+          });
+          p.on("error", e => {
+            if (st.me !== p) return;
+            if (e && e.type === "unavailable-id") { kill(); asClient(ready, fail); }
+            else if (!st.id) { kill(); fail(e); }
+          });
+        }
+        function asClient(ready, fail) {
+          const p = new PeerCls(); st.me = p;
+          p.on("open", id => {
+            st.id = id; st.hub = false;
+            const c = p.connect(hubId, { serialization: "json" });
+            st.up = c;
+            let opened = false;
+            c.on("open", () => { opened = true; st.tries = 0; if (!peek && Object.keys(st.mine).length) send(c, { t: "p", p: st.mine }); ready(); });
+            c.on("data", m => {
+              if (!m) return;
+              if (m.t === "all" && Array.isArray(m.ps)) { st.others.clear(); m.ps.forEach(([id, pp]) => { if (id !== st.id && pp && typeof pp === "object") st.others.set(id, pp); }); st.snap = null; }
+              else if (m.t === "p" && m.id !== st.id) setP(m.id, m.p);
+              else if (m.t === "x") setP(m.id, null);
+              else if (m.t === "bye") { try { c.close(); } catch (e) {} lost(); }
+            });
+            function lost() { if (st.left || st.up !== c) return; st.up = null; st.others.clear(); st.snap = null; if (opened && !peek) again(); }
+            c.on("close", lost); c.on("error", lost);
+          });
+          p.on("error", e => {
+            if (st.me !== p) return;
+            // Ingen har adressen (knutepunktet gikk akkurat): prøv å ta den selv om litt
+            if (e && e.type === "peer-unavailable") { kill(); if (peek) ready(); else again(ready, fail); }
+            else if (!st.id) { kill(); fail(e); }
+            else if (!st.left && !peek) again();
+          });
+        }
+        function again(ready, fail) {
+          if (st.left) return;
+          kill(); st.others.clear(); st.snap = null;
+          if (++st.tries > 20) { if (fail) fail(new Error("gave up")); return; }
+          setTimeout(() => start(ready || (() => {}), fail || (() => {})), 400 + Math.random() * 1200);
+        }
+        const room = {
+          name,
+          presence(patch) {
+            if (st.left || !patch) return Promise.resolve();
+            for (const k in patch) { if (patch[k] === null) delete st.mine[k]; else st.mine[k] = patch[k]; }
+            st.snap = null;
+            if (st.hub) st.conns.forEach(c => send(c, { t: "p", id: st.id, p: st.mine }));
+            else send(st.up, { t: "p", p: st.mine });
+            return Promise.resolve();
+          },
+          peers() {
+            if (!st.snap) {
+              const meP = { peer: st.id || "meg", label: st.id || "meg", sameTab: true, isMe: true, kind: "viewer", guest: false, by: null, presence: st.mine };
+              st.snap = [meP, ...[...st.others].map(([id, p]) => ({ peer: id, label: id, sameTab: false, isMe: false, kind: "viewer", guest: false, by: null, presence: p }))];
+            }
+            return st.snap;
+          },
+          connected() { return !!(st.hub || (st.up && st.up.open)); },
+          leave() {
+            if (st.hub) st.conns.forEach(c => send(c, { t: "bye" })); else send(st.up, { t: "bye" });
+            st.left = true; clearInterval(st.prune);
+            const m = st.me; st.me = null; st.up = null; st.conns.clear(); st.others.clear(); st.snap = null;
+            setTimeout(() => { try { if (m) m.destroy(); } catch (e) {} }, 300);
+            return Promise.resolve();
+          }
+        };
+        return new Promise((res, rej) => {
+          let doneP = false;
+          const ready = () => { if (!doneP) { doneP = true; res(room); } };
+          const fail = e => { if (!doneP) { doneP = true; st.left = true; kill(); rej({ code: "upstream_error", message: String(e && (e.type || e.message) || e) }); } };
+          setTimeout(() => fail(new Error("tidsavbrudd")), 12000);
+          start(ready, fail);
+        });
+      }
+    };
+  }
   (async () => {
     // Claude-siden kan koble seg på litt etter at skriptet har startet: vent opptil 3 sekunder
     for (let i = 0; i < 15 && !(window.claude && window.claude.use); i++) await new Promise(r => setTimeout(r, 200));
     try { roomNS = window.claude && window.claude.use ? await window.claude.use("room") : null; }
     catch (e) { roomNS = null; }
+    // Ikke i Claude i det hele tatt: bruk PeerJS
+    if (!roomNS && !(window.claude && window.claude.use)) { const P = await mpLoadPeer(); if (P) roomNS = mpPeerRooms(P); }
     roomChecked = true;
     mpStatus();
   })();
@@ -13962,7 +14099,7 @@ body {
     const el = inLobby ? $("mp-copycode") : $("mp-room");
     const txt = code === "FELLES"
       ? "Bli med meg i TWD i Norge! Åpne spillet, velg Flerspiller og Åpent rom."
-      : `Bli med meg i TWD i Norge! Åpne spillet, velg Flerspiller, trykk «Bli med med kode» og skriv: ${code}`;
+      : `Bli med meg i TWD i Norge! Åpne spillet${roomNS && roomNS.peerjs ? " (" + location.origin + location.pathname + ")" : ""}, velg Flerspiller, trykk «Bli med med kode» og skriv: ${code}`;
     // Først den gamle måten, mens trykket fortsatt gjelder; så utklippstavla (som kan bli hengende i en innebygd side)
     let ok = false;
     try {
@@ -13998,7 +14135,11 @@ body {
     };
   }
   let mpRoomErr = "";
-  async function mpOpenRoom(code) {
+  async function mpOpenRoom(code, peek) {
+    if (roomNS && roomNS.peerjs) {
+      try { return await roomNS.join("twd-" + code, { peek: !!peek }); }
+      catch (e) { mpRoomErr = (e && e.code) || "ukjent"; throw new Error(mpRoomErr); }
+    }
     mpRoomErr = "";
     for (let i = 0; i < 2; i++) {
       try { return await roomNS.join("twd-" + code); }
@@ -14014,7 +14155,7 @@ body {
   }
   // Hvorfor flerspiller ikke virker på denne siden
   function mpWhyNot() {
-    if (/github\.io$/i.test(location.hostname)) return "Dette er GitHub-versjonen av spillet. Her kan du bare spille alene. For å spille sammen må dere begge åpne spillet på claude.ai.";
+    if (!(window.claude && window.claude.use)) return "Fikk ikke kontakt med flerspiller-tjenesten (PeerJS). Sjekk at du er på nett og last siden på nytt. På noen skole- og jobbnett er den blokkert.";
     return "Du må åpne spillet på claude.ai og være logget inn. Vennen din må ha fått tilgang med e-postadressen sin i Del-menyen (en offentlig lenke virker ikke for flerspiller).";
   }
   function mpShowWarn(extra) {
@@ -14036,7 +14177,7 @@ body {
     if (!code) { $("mp-roomnow").textContent = "Skriv inn koden du har fått av en venn."; return; }
     if (!$("mp-roomnow").textContent) $("mp-roomnow").textContent = mpWay === "open" ? "Ser etter spillere i det åpne rommet …" : `Ser etter spillere med koden ${shown} …`;
     let net = null;
-    try { net = await mpOpenRoom(code); } catch (e) { if (my === mpPeekN) { $("mp-roomnow").textContent = ""; mpShowWarn("Prøv igjen om litt. " + mpWhyNot()); } return; }
+    try { net = await mpOpenRoom(code, true); } catch (e) { if (my === mpPeekN) { $("mp-roomnow").textContent = ""; mpShowWarn("Prøv igjen om litt. " + mpWhyNot()); } return; }
     mpPeek = net;
     await new Promise(r => setTimeout(r, 1500));
     let names = [], wave = 0;
@@ -14070,7 +14211,7 @@ body {
     $("mp-status").textContent = msg || (!roomChecked
       ? "Kobler til …"
       : roomNS
-        ? (mpWay === "host" ? "Vennene dine velger «Bli med med kode» og skriver koden din. Bare de som har koden, kommer inn."
+        ? (roomNS.peerjs && mpWay !== "open" ? "Dere kobles direkte sammen over nettet. " : "") + (mpWay === "host" ? "Vennene dine velger «Bli med med kode» og skriver koden din. Bare de som har koden, kommer inn."
           : mpWay === "join" ? "Skriv koden vennen din ser på skjermen sin (store eller små bokstaver, det er det samme)."
           : "Alle som velger Åpent rom, havner i samme spill.")
         : "Flerspiller er ikke tilgjengelig her, men du kan spille alene.");
