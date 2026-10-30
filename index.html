@@ -6884,7 +6884,7 @@ if (TW_LANG === "en") {
       ground.rotation.x = -Math.PI / 2;
       scene3.add(ground);
 
-      // Fylkesveien: asfalt, gul midtlinje, brøytekanter og brøytestikker
+      // Fylkesveien: asfalt, gul midtlinje og brøytekanter
       const road = new T.Mesh(new T.PlaneGeometry(ROAD_HALF * 2, 7), lam(0x2c3236));
       road.rotation.x = -Math.PI / 2;
       road.position.set(0, 0.02, ROAD_Z);
@@ -6906,15 +6906,6 @@ if (TW_LANG === "en") {
         scene3.add(b); BANKS.push(b);
         rects.push({ x0, x1, z0: z - 0.6, z1: z + 0.6, bank: true });
       });
-      const poleSpots = [];
-      for (let x = -ROAD_HALF; x < ROAD_HALF; x += 20) {
-        if (x < -1 || x > 7) poleSpots.push([x, -21.4]);
-        poleSpots.push([x + 10, -27.6]);
-      }
-      const poles = new T.InstancedMesh(new T.CylinderGeometry(0.03, 0.03, 1.9, 5), new T.MeshLambertMaterial({ color: 0xe0601e }), poleSpots.length);
-      poleSpots.forEach(([x, z], i) => { d.position.set(x, 0.95, z); d.updateMatrix(); poles.setMatrixAt(i, d.matrix); });
-      poles.frustumCulled = false;
-      scene3.add(poles); POLES = poles;
       const drive = new T.Mesh(new T.PlaneGeometry(4, 18), lam(0xa3b0b9));
       drive.rotation.x = -Math.PI / 2;
       drive.position.set(3, 0.01, -11);
@@ -19708,7 +19699,7 @@ if (TW_LANG === "en") {
 
   // Versjonsnummer nede i høyre hjørne: hvitt når dette er den nyeste versjonen, rødt når det finnes en nyere på GitHub
   {
-    const TW_VER = 231;
+    const TW_VER = 232;
     const el = document.createElement("div");
     el.className = "twver"; el.id = "twver";
     el.textContent = _T`Versjon 0,${TW_VER}`;
