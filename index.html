@@ -750,6 +750,13 @@ body {
 .hpbar { display: block; width: 11rem; height: 0.6rem; background: rgba(234, 240, 241, 0.12); }
 .hpbar i { display: block; height: 100%; width: 100%; background: var(--on); transition: width 0.15s; }
 .hpbar.low i { background: var(--blood-hi); }
+.cheat { position: fixed; left: 50%; top: 22%; transform: translateX(-50%); z-index: 40; width: min(18rem, calc(100vw - 32px)); box-sizing: border-box; padding: 1rem 1.1rem; background: rgba(6, 10, 12, 0.95); border: 1px solid var(--blood); text-align: center; }
+.cheat h4 { margin: 0 0 0.6rem; font-family: var(--f-mono); font-size: 0.75rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--fog); }
+.cheat input { width: 100%; box-sizing: border-box; font-family: var(--f-mono); font-size: 2rem; letter-spacing: 0.4em; text-align: center; padding: 0.3rem 0 0.3rem 0.4em; background: var(--night); color: var(--snow); border: 1px solid var(--line); }
+.cheat input:focus { outline: 2px solid var(--snow); outline-offset: 2px; }
+.cheat p { margin: 0.6rem 0 0; font-size: 0.9rem; color: var(--fog); min-height: 1.3em; }
+.cheat p.ok { color: #8fd18a; }
+.cheat p.bad { color: #ff7a6a; }
 .mp-bag { position: fixed; left: 50%; top: 18%; transform: translateX(-50%); z-index: 6; width: min(20rem, calc(100vw - 32px)); padding: 0.8rem 1rem; background: rgba(6, 10, 12, 0.92); border: 1px solid var(--line); }
 .mp-bag h4 { margin: 0 0 0.5rem; font-family: var(--f-mono); font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--fog); }
 .mp-bag ul { list-style: none; margin: 0 0 0.5rem; padding: 0; display: grid; gap: 0.3rem; }
@@ -1098,6 +1105,7 @@ body {
       <dt>WASD</dt><dd>Gå (Shift: løp)</dd>
       <dt>Mus / klikk</dt><dd>Se rundt / slå</dd>
       <dt>E</dt><dd>Let i hus, sett deg i eller gå ut av bil</dd>
+      <dt>U</dt><dd>Skriv en juksekode (fire sifre)</dd>
       <dt>1 · 2 · 3</dt><dd>Spis · drikk · bandasje</dd>
       <dt>G</dt><dd>Fyll bensin fra kanne</dd>
       <dt>V</dt><dd>Bytt våpen</dd>
@@ -1221,6 +1229,7 @@ body {
         <div data-keys>
           <dt>WASD · Shift</dt><dd>Gå · løp (løping bruker utholdenhet, den gule linja)</dd>
           <dt>Klikk · Mellomrom · F</dt><dd>Slå med brekkjernet, eller skyt hvis du har pistol</dd>
+          <dt>U</dt><dd>Juksekode: skriv fire sifre og trykk Enter</dd>
           <dt>E</dt><dd>Inne i et hus: se på en ting (den vokser litt) og ta den. Ved en bil: sett deg inn (eller sitt på). Ellers: spark zombiene foran deg unna (hvert 4. sekund)</dd>
           <dt>B</dt><dd>Sett opp en barrikade (én per flokk). Står du ved en skadet barrikade, reparerer du den i stedet. Skadde barrikader har en helselinje over seg</dd>
           <dt>G</dt><dd>Ved en bil med bensinkanne i sekken: fyll på tanken. Ellers: marker det du ser på: et sted, en zombie eller en kasse. En markert zombie beholder markøren til den faller, og den som slår den ned, får 2 ekstra poeng. Blir du bitt ned, markeres zombien som gjorde det, av seg selv, så laget kan ta hevn</dd>
@@ -1313,6 +1322,7 @@ body {
       <button type="button" id="mp-give" hidden><kbd>T</kbd><span>Gi skudd</span></button>
       <button type="button" id="mp-eat" hidden><kbd>I</kbd><span>Spis</span></button>
       <button type="button" id="mp-bagbtn"><kbd>Tab</kbd><span>Sekk</span></button>
+      <button type="button" id="mp-cheatbtn"><kbd>U</kbd><span>Kode</span></button>
       <button type="button" id="mp-msgs" aria-expanded="false">Meldinger ▾</button>
       <button type="button" data-q="0"><kbd>1</kbd>Hjelp meg!</button>
       <button type="button" data-q="1"><kbd>2</kbd>Kom hit!</button>
@@ -1347,6 +1357,11 @@ body {
     <button class="btn primary mp-attack" id="btn-attack" type="button" hidden>Slå</button>
   </div>
 
+  <div class="cheat" id="cheat" role="dialog" aria-labelledby="cheat-h" hidden>
+    <h4 id="cheat-h">Juksekode</h4>
+    <input type="text" id="cheat-in" inputmode="numeric" maxlength="4" autocomplete="off" spellcheck="false" placeholder="0000" aria-describedby="cheat-msg">
+    <p id="cheat-msg">Skriv fire sifre og trykk Enter. Esc lukker.</p>
+  </div>
   <div id="sbhud" hidden>
     <div class="objective">
       <span class="eyebrow" id="sb-phase">Morgen</span><strong id="sb-clock">Dag 1 · 08:00</strong>
@@ -1369,6 +1384,7 @@ body {
       <button class="btn" type="button" data-sb="eat">Spis</button>
       <button class="btn" type="button" data-sb="drink">Drikk</button>
       <button class="btn" type="button" data-sb="use">Bruk</button>
+      <button class="btn" type="button" id="sb-cheatbtn">Kode</button>
       <button class="btn primary" type="button" data-sb="attack">Slå</button>
     </div>
     <div class="mp-center" id="sb-dead" hidden>
@@ -10617,6 +10633,7 @@ body {
     function sbStart() {
       if (!init()) return false;
       mpAssets();
+      SB.god = false;
       setup({ mode: "sb" });
       SB.zs.forEach(z => sbFree(z.m));
       const r = rng(Math.floor(Math.random() * 100000) + 1);
@@ -10900,6 +10917,7 @@ body {
     }
 
     function sbUpdate(t, dt) {
+      if (SB.god && SB.on) SB.hp = 100;
       if (!SB.on) return;
       const gm = dt * SB_TIME;
       if (!SB.dead) {
@@ -11170,6 +11188,41 @@ body {
     }
 
     function mpNotice(t) { MP.msg = t; MP.msgT = 9; }
+    // Juksekoder (fire sifre). Gir tilbake teksten som vises, eller null for en ukjent kode
+    function cheatCode(code) {
+      const mp = mode3 === "mp" && MP.on, sb = mode3 === "sb" && SB.on;
+      if (!mp && !sb) return { t: "Juksekoder virker bare i flerspiller og sandkassen.", ok: false };
+      const foodsN = n => { for (let i = 0; i < n; i++) (mp ? MP.foods : SB.inv.foods).push(SB_FOODS[Math.floor(Math.random() * SB_FOODS.length)]); };
+      const drinksN = n => { for (let i = 0; i < n; i++) (mp ? MP.drinks : SB.inv.drinks).push(SB_DRINKS[Math.floor(Math.random() * SB_DRINKS.length)]); };
+      const C = {
+        // Alle våpen
+        "1111": () => {
+          if (mp) { MP.ammo += 40; MP.shells = Math.max(MP.shells, 16); MP.axe = Math.max(MP.axe, 180); MP.oks = true; MP.nades = 6; MP.flares = 3; return "Alle våpen! Pistol, hagle, brannøks, øks, granater og bluss."; }
+          SB.owned = W_ORDER.slice(); SB.inv.ammo += 30; SB.weapon = "gevaer"; return "Alle våpen! Kniv, bandykølle, øks og jaktgevær med 30 patroner. V bytter våpen.";
+        },
+        // Masse skudd
+        "2222": () => { if (mp) { MP.ammo += 100; MP.shells = Math.max(MP.shells, 40); } else { if (!SB.owned.includes("gevaer")) SB.owned.push("gevaer"); SB.inv.ammo += 100; } return "Masse skudd!"; },
+        // Full helse
+        "3333": () => { if (mp) { MP.hp = 100; MP.medkits = 3; if (MP.down) { MP.down = false; MP.rv = 0; MP.inv = 2; } } else { SB.hp = 100; SB.inv.bandage += 5; } return "Full helse og førstehjelp!"; },
+        // Mat og drikke
+        "4444": () => { if (mp) { MP.food = 100; MP.water = 100; } else { SB.food = 100; SB.water = 100; } foodsN(5); drinksN(5); return "Mett og utvilt, og sekken full av mat og drikke!"; },
+        // Bensin
+        "5555": () => { if (mp) MP.cans += 5; else SB.inv.can += 5; return "Fem bensinkanner!"; },
+        // Granater og bluss
+        "6666": () => { if (!mp) return "Granater og bluss finnes bare i flerspiller."; MP.nades = 6; MP.flares = 3; return "Seks granater og tre lokkebluss!"; },
+        // Udødelig (av og på)
+        "7777": () => { if (mp) { MP.god = !MP.god; return MP.god ? "Udødelig! Zombiene klarer ikke å skade deg. 7777 igjen slår det av." : "Udødelig er av."; } SB.god = !SB.god; return SB.god ? "Udødelig! Zombiene klarer ikke å skade deg. 7777 igjen slår det av." : "Udødelig er av."; },
+        // Alt på en gang
+        "9999": () => { ["1111", "2222", "3333", "4444", "5555"].forEach(k => C[k]()); if (mp) { MP.nades = 6; MP.flares = 3; } return "Alt sammen! Alle våpen, masse skudd, full helse, mat, drikke og bensin."; },
+        // Slå av juks
+        "0000": () => { MP.god = false; SB.god = false; return "Udødelig er slått av."; }
+      };
+      const f = C[code];
+      if (!f) return null;
+      const t = f();
+      if (mp) { MP.msg = t; MP.msgT = 3; Sound.click(); mpSend(); } else { sbToast(t); Sound.click(); }
+      return { t, ok: true };
+    }
     function mpStart(net, name, color, diff) {
       if (!init()) return false;
       mpAssets();
@@ -11179,7 +11232,7 @@ body {
       { const rr = rng(4242); SB.cars.forEach(c => { Object.assign(c, { x: c.home.x, z: c.home.z, h: c.home.h, driver: null }); c.works = c.own ? true : rr() < 0.62; c.fuel = c.own ? 0.12 : rr() < 0.3 ? 0 : 0.05 + rr() * 0.5; c.g.position.set(c.x, 0, c.z); c.g.rotation.y = c.h; c.g.visible = true; }); }
       Object.assign(MP, {
         on: true, net, name, color, hp: 100, down: false, rv: 0, kills: 0, aSeq: 0, aTarget: -1, swing: 0, cool: 0, hurt: 0,
-        nextId: 1, wave: 0, toSpawn: 0, spawnT: 0, brk: 1e9, clock: 480, day: 1, daySeen: undefined, phSeen: undefined, dyInit: false, ua: 0, uaSeen: undefined, uaInit: false, upT: 0, ambT: 3, oks: false, ti: 0, tiId: -1, lastTi: {}, look: null, inCar: null, ride: null, cx: 0, lastCx: {}, foods: ["brødskive"], drinks: ["flaske vann"], food: 75, water: 70, hungerSeen: false, cans: 0, search: null, hs: 0, hsI: -1, lastHs: {}, over: 0, left: 0, epoch: 0, seenEpoch: -1,
+        nextId: 1, wave: 0, toSpawn: 0, spawnT: 0, brk: 1e9, clock: 480, day: 1, daySeen: undefined, phSeen: undefined, god: false, dyInit: false, ua: 0, uaSeen: undefined, uaInit: false, upT: 0, ambT: 3, oks: false, ti: 0, tiId: -1, lastTi: {}, look: null, inCar: null, ride: null, cx: 0, lastCx: {}, foods: ["brødskive"], drinks: ["flaske vann"], food: 75, water: 70, hungerSeen: false, cans: 0, search: null, hs: 0, hsI: -1, lastHs: {}, over: 0, left: 0, epoch: 0, seenEpoch: -1,
         lastSeq: {}, sendT: 0, hudT: 0, host: !net, wasHost: false, lastSnap: null, hostPeer: null, tk: 0, seen: {}, stale: new Set(), lastUpd: 0, wokeAt: -1e9, startAt: performance.now(), joinNear: true, joinKit: true, prevHost: null, hostNote: null, needAmmo: {}, checkpoint: 0, roar: 0, roarK: 0, roarSeen: 0, roarInit: false
       });
       MP.zs.clear();
@@ -12797,6 +12850,7 @@ body {
 
     function mpUpdate(t, dt) {
       if (!MP.on) return;
+      if (MP.god) { MP.hp = 100; if (MP.down) { MP.down = false; MP.rv = 0; } }
       let me = null, others = [];
       if (MP.net) {
         const ps = MP.net.peers();
@@ -13567,7 +13621,7 @@ body {
     return {
       ok: () => ok === true,
       setup, render, resize, tryInteract, releasePointer,
-      mpStart, mpStop, mpNotice, mpMedalShout, mpEat, mpAttack, mpQuick, mpKick, mpBarricade, mpPing, mpPerk, mpGive, mpThrow, mpLamp, mpReady, mpFlare, mpSpec, mpBuy, MP_COLORS,
+      mpStart, mpStop, mpNotice, cheatCode, mpMedalShout, mpEat, mpAttack, mpQuick, mpKick, mpBarricade, mpPing, mpPerk, mpGive, mpThrow, mpLamp, mpReady, mpFlare, mpSpec, mpBuy, MP_COLORS,
       mpSetHelp(on) { MP.helpOpen = !!on; },
       sbStart, sbStop, sbAttack, sbUse, sbRefuel, sbConsume, sbSwitchWeapon, fightAttack,      setJoy(x, y) { joy.x = x; joy.y = y; },
       on(name, fn) { cb[name] = fn; },
@@ -15348,8 +15402,44 @@ body {
   $("btn-pause").addEventListener("click", () => { leavePlay(); show("menu"); });
   fade.addEventListener("animationend", () => fade.classList.remove("wake"));
 
+  // ---------- Juksekoder ----------
+  function cheatOpen() {
+    if (mode !== "play" || (control !== "mp" && control !== "sb")) return;
+    try { if (document.exitPointerLock) document.exitPointerLock(); } catch (e) {}
+    $("cheat-in").value = ""; $("cheat-msg").textContent = "Skriv fire sifre og trykk Enter. Esc lukker."; $("cheat-msg").className = "";
+    $("cheat").hidden = false;
+    $("cheat-in").focus();
+  }
+  function cheatClose() { $("cheat").hidden = true; $("cheat-in").blur(); }
+  function cheatTry() {
+    const code = $("cheat-in").value.replace(/\D/g, "");
+    const msg = $("cheat-msg");
+    if (code.length !== 4) { msg.textContent = "Koden har fire sifre."; msg.className = "bad"; return; }
+    const r = World.cheatCode(code);
+    if (!r) { msg.textContent = "Feil kode. Prøv igjen."; msg.className = "bad"; $("cheat-in").select(); return; }
+    msg.textContent = r.t; msg.className = r.ok ? "ok" : "bad";
+    if (r.ok) setTimeout(cheatClose, 1400);
+  }
+  $("cheat-in").addEventListener("input", () => {
+    const v = $("cheat-in").value.replace(/\D/g, "").slice(0, 4);
+    if (v !== $("cheat-in").value) $("cheat-in").value = v;
+    if (v.length === 4) cheatTry();
+  });
+  $("mp-cheatbtn").addEventListener("click", e => { e.stopPropagation(); cheatOpen(); });
+  $("sb-cheatbtn").addEventListener("click", e => { e.stopPropagation(); cheatOpen(); });
+  $("cheat").addEventListener("click", e => e.stopPropagation());
+
   // ---------- Tastatur ----------
   document.addEventListener("keydown", e => {
+    // Mens kodevinduet er åpent, går tastene dit og ikke til spillet
+    if (!$("cheat").hidden) {
+      if (e.key === "Escape") { e.preventDefault(); cheatClose(); }
+      else if (e.key === "Enter") { e.preventDefault(); cheatTry(); }
+      else if (document.activeElement !== $("cheat-in")) $("cheat-in").focus();
+      e.stopImmediatePropagation();
+      return;
+    }
+    if (mode === "play" && (control === "mp" || control === "sb") && e.code === "KeyU" && !e.repeat) { e.preventDefault(); cheatOpen(); return; }
     if (mode === "play") {
       if (control) {
         if (control === "sb" && !e.repeat) {
@@ -15366,7 +15456,7 @@ body {
         else if (control === "mp" && e.code === "KeyI" && !e.repeat) World.mpEat();
         else if (control === "mp" && e.code === "Tab") { e.preventDefault(); if (!e.repeat) $("mp-bag").hidden = !$("mp-bag").hidden; }
         else if (control === "mp" && e.code === "KeyK" && !e.repeat) World.mpReady();
-        else if (control === "mp" && (e.code === "KeyZ" || e.code === "KeyX" || e.code === "KeyN" || e.code === "KeyM" || e.code === "KeyJ" || e.code === "KeyU") && !e.repeat) World.mpBuy({ KeyZ: 0, KeyX: 1, KeyN: 2, KeyM: 3, KeyJ: 4, KeyU: 5 }[e.code]);
+        else if (control === "mp" && (e.code === "KeyZ" || e.code === "KeyX" || e.code === "KeyN" || e.code === "KeyM" || e.code === "KeyJ") && !e.repeat) World.mpBuy({ KeyZ: 0, KeyX: 1, KeyN: 2, KeyM: 3, KeyJ: 4 }[e.code]);
         else if (control === "mp" && e.code === "KeyR" && !e.repeat) World.mpThrow();
         else if (control === "mp" && e.code === "KeyV" && !e.repeat) World.mpFlare();
         else if (control === "mp" && e.code === "KeyC" && !e.repeat) World.mpSpec();
