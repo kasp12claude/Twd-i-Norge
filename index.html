@@ -698,6 +698,8 @@ body {
 .mp-hostbox .lbl { font-size: 0.95rem; color: var(--fog); }
 .mp-bigcode { font-family: var(--f-mono); font-size: 2rem; font-weight: 700; letter-spacing: 0.25em; color: var(--snow); }
 .row #mp-code.big { font-family: var(--f-mono); font-size: 1.5rem; letter-spacing: 0.25em; text-transform: uppercase; }
+.mp-warn { margin: 0; padding: 0.7rem 0.9rem; border: 1px solid var(--blood); background: rgba(150, 30, 30, 0.18); color: var(--snow); font-size: 0.95rem; line-height: 1.45; }
+.mp-warn b { display: block; margin-bottom: 0.2rem; }
 .mp-room { pointer-events: auto; cursor: pointer; }
 .mp-room:hover { border-color: var(--fog); }
 .mp-room.copied { color: #8fd18a; border-color: #8fd18a; }
@@ -1064,6 +1066,7 @@ body {
         <input type="text" id="mp-code" class="big" maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="K7P2">
       </div>
       <p class="status" id="mp-roomnow" aria-live="polite"></p>
+      <p class="mp-warn" id="mp-warn" role="alert" hidden></p>
       <div class="row">
         <span id="mp-color-l">Farge</span>
         <fieldset class="mp-colors" id="mp-colors" aria-labelledby="mp-color-l"></fieldset>
@@ -10945,6 +10948,7 @@ body {
       }
     }
 
+    function mpNotice(t) { MP.msg = t; MP.msgT = 9; }
     function mpStart(net, name, color, diff) {
       if (!init()) return false;
       mpAssets();
@@ -11098,6 +11102,7 @@ body {
       } else {
         p.zs = null; p.w = null; p.br = null; p.ov = null; p.lf = null; p.ep = null; p.pk = null; p.bz = null; p.sp = null; p.df = null; p.md = null; p.bb = null; p.rr = null; p.cp = null; p.sd = null; p.ch = null;
       }
+      if (MP.host && p.zs) { let n = JSON.stringify(p).length; while (n > 3400 && p.zs.length > 8) { p.zs.length = Math.max(8, p.zs.length - 6); n = JSON.stringify(p).length; } }
       MP.net.presence(p).catch(() => {});
     }
 
@@ -13284,7 +13289,7 @@ body {
     return {
       ok: () => ok === true,
       setup, render, resize, tryInteract, releasePointer,
-      mpStart, mpStop, mpMedalShout, mpEat, mpAttack, mpQuick, mpKick, mpBarricade, mpPing, mpPerk, mpGive, mpThrow, mpLamp, mpReady, mpFlare, mpSpec, mpBuy, MP_COLORS,
+      mpStart, mpStop, mpNotice, mpMedalShout, mpEat, mpAttack, mpQuick, mpKick, mpBarricade, mpPing, mpPerk, mpGive, mpThrow, mpLamp, mpReady, mpFlare, mpSpec, mpBuy, MP_COLORS,
       mpSetHelp(on) { MP.helpOpen = !!on; },
       sbStart, sbStop, sbAttack, sbUse, sbRefuel, sbConsume, sbSwitchWeapon, fightAttack,      setJoy(x, y) { joy.x = x; joy.y = y; },
       on(name, fn) { cb[name] = fn; },
@@ -13639,6 +13644,8 @@ body {
   const MP_KEY = "twd-norge-mp";
   let roomNS = null, roomChecked = false, mpNet = null, mpStarting = false, mpRoomCode = "";
   (async () => {
+    // Claude-siden kan koble seg på litt etter at skriptet har startet: vent opptil 3 sekunder
+    for (let i = 0; i < 15 && !(window.claude && window.claude.use); i++) await new Promise(r => setTimeout(r, 200));
     try { roomNS = window.claude && window.claude.use ? await window.claude.use("room") : null; }
     catch (e) { roomNS = null; }
     roomChecked = true;
@@ -13701,6 +13708,44 @@ body {
   }
   let mpCopyTimer = 0;
   $("mp-room").addEventListener("click", e => { e.stopPropagation(); mpCopyInvite(); });
+  // Eget rom for koden. Nekter plattformen egne rom (for eksempel for inviterte gjester), bruker vi fellesrommet
+  // og merker oss med koden, så bare de med samme kode ser hverandre.
+  function mpLobbyNet(code) {
+    const keys = new Set();
+    return {
+      lobby: true,
+      presence: p => { Object.keys(p).forEach(k => keys.add(k)); return roomNS.presence(Object.assign({}, p, { rc: code })); },
+      peers: () => roomNS.peers().filter(q => q.sameTab || (q.presence && q.presence.rc === code)),
+      leave: async () => { const z = { rc: null }; keys.forEach(k => { z[k] = null; }); keys.clear(); try { await roomNS.presence(z); } catch (e) {} }
+    };
+  }
+  let mpRoomErr = "";
+  async function mpOpenRoom(code) {
+    mpRoomErr = "";
+    for (let i = 0; i < 2; i++) {
+      try { return await roomNS.join("twd-" + code); }
+      catch (e) {
+        mpRoomErr = (e && e.code) || "ukjent";
+        if (mpRoomErr !== "upstream_error") break;
+      }
+    }
+    if (mpRoomErr === "not_permitted" || mpRoomErr === "limit_reached" || mpRoomErr === "upstream_error") {
+      try { if (typeof roomNS.presence === "function" && typeof roomNS.peers === "function") return mpLobbyNet(code); } catch (e) {}
+    }
+    throw new Error(mpRoomErr);
+  }
+  // Hvorfor flerspiller ikke virker på denne siden
+  function mpWhyNot() {
+    if (/github\.io$/i.test(location.hostname)) return "Dette er GitHub-versjonen av spillet. Her kan du bare spille alene. For å spille sammen må dere begge åpne spillet på claude.ai.";
+    return "Du må åpne spillet på claude.ai og være logget inn. Vennen din må ha fått tilgang med e-postadressen sin i Del-menyen (en offentlig lenke virker ikke for flerspiller).";
+  }
+  function mpShowWarn(extra) {
+    const w = $("mp-warn");
+    if (roomNS && !extra) { w.hidden = true; return; }
+    const b = document.createElement("b"); b.textContent = extra ? "Fikk ikke kontakt med rommet" : "Flerspiller virker ikke her";
+    w.replaceChildren(b, extra || mpWhyNot());
+    w.hidden = false;
+  }
   // Kikk inn i rommet før du går inn: hvem er der allerede? (vi sender ingen presence, så ingen ser oss)
   let mpPeek = null, mpPeekN = 0, mpPeekTimer = 0;
   const mpTyped = () => $("mp-code").value.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 20);
@@ -13713,7 +13758,7 @@ body {
     if (!code) { $("mp-roomnow").textContent = "Skriv inn koden du har fått av en venn."; return; }
     if (!$("mp-roomnow").textContent) $("mp-roomnow").textContent = mpWay === "open" ? "Ser etter spillere i det åpne rommet …" : `Ser etter spillere med koden ${shown} …`;
     let net = null;
-    try { net = await roomNS.join("twd-" + code); } catch (e) { if (my === mpPeekN) $("mp-roomnow").textContent = ""; return; }
+    try { net = await mpOpenRoom(code); } catch (e) { if (my === mpPeekN) { $("mp-roomnow").textContent = ""; mpShowWarn("Prøv igjen om litt. " + mpWhyNot()); } return; }
     mpPeek = net;
     await new Promise(r => setTimeout(r, 1500));
     let names = [], wave = 0;
@@ -13742,6 +13787,8 @@ body {
     clearTimeout(mpPeekTimer); mpPeekTimer = setTimeout(mpPeekRoom, 600);
   });
   function mpStatus(msg) {
+    if (roomChecked) mpShowWarn();
+    if (roomChecked && !roomNS) $("btn-mp-join").textContent = "Spill alene";
     $("mp-status").textContent = msg || (!roomChecked
       ? "Kobler til …"
       : roomNS
@@ -13868,7 +13915,7 @@ body {
     let notice = "";
     if (roomNS) {
       mpStatus("Går inn i rommet …");
-      try { mpNet = await roomNS.join("twd-" + code); }
+      try { mpNet = await mpOpenRoom(code); }
       catch (err) { mpNet = null; notice = "Fikk ikke kontakt med rommet, så du spiller alene."; }
     }
     mpStarting = false;
@@ -13892,6 +13939,7 @@ body {
     Sound.setSirens(true);
     $("mp-help").hidden = true;
     if (!(load(MP_KEY) || {}).helpSeen) mpHelp(true);
+    if (!mpNet) World.mpNotice((notice || "Flerspiller virker ikke her, så du spiller alene.") + " " + mpWhyNot());
   });
 
   function stopMp() {
