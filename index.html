@@ -1044,7 +1044,7 @@ body {
   <section id="view-mp" class="view panel" hidden aria-labelledby="mp-h">
     <p class="eyebrow">Ny modus</p>
     <h2 id="mp-h">Flerspiller</h2>
-    <p>Sandkasse sammen med andre som har denne siden åpen samtidig. Dere våkner på ulike steder i bygda med tilfeldig utstyr, og kan gå inn i husene. Klokka går fra morgen til natt, og zombiene streifer rundt hele tiden, flere når det blir mørkt og jo lenger dere holder ut. Slå med brekkjernet, spark dem unna, sett opp barrikader og hjelp hverandre opp. Ligger alle nede, kommer dere dere på beina igjen. Det finnes ingen rekord, bare bygda og dere.</p>
+    <p>Sandkasse sammen med andre som har denne siden åpen samtidig. Dere våkner på ulike steder i bygda med tilfeldig utstyr, og kan gå inn i husene. Dere starter om morgenen. Dagen varer 20 minutter og natta 10, og om natta kommer det mange flere zombier. Bensinkanner ligger ute ved bilene, ved bensinstasjonen og langs veien. Slå med brekkjernet, spark dem unna, sett opp barrikader og hjelp hverandre opp. Ligger alle nede, kommer dere dere på beina igjen. Det finnes ingen rekord, bare bygda og dere.</p>
     <form id="mp-form" class="settings-grid">
       <div class="row">
         <label for="mp-name">Navnet ditt</label>
@@ -10749,7 +10749,11 @@ body {
     const MP_BOUNDS = [-150, 150, -70, 20];
     // Et sted et stykke unna en tilfeldig spiller (zombier og kasser dukker opp rundt dere, ikke midt i bygda)
     // Hvor farlig bygda er: øker for hver dag, og om natta (styrer hvilke zombietyper som dukker opp og hvor raske de er)
-    function mpThreat() { return Math.min(12, 1 + ((MP.day || 1) - 1) * 3 + Math.round((1 - sbDaylight(MP.clock ?? 480)) * 3)); }
+    function mpDaylight(t) { const h = t / 60; return h >= 8 && h < 19 ? 1 : h >= 19 && h < 20 ? 20 - h : h >= 7 && h < 8 ? h - 7 : 0; }
+    const mpIsDay = t => t >= 480 && t < 1200;
+    // Spillminutter per sekund: 720 minutter dag på 1200 sekunder, 720 minutter natt på 600 sekunder
+    const mpRate = t => mpIsDay(t) ? 0.6 : 1.2;
+    function mpThreat() { return Math.min(12, 1 + ((MP.day || 1) - 1) * 3 + Math.round((1 - mpDaylight(MP.clock ?? 480)) * 3)); }
     function mpNearSpot(r0, r1, ang) {
       const ps = (MP.simPlayers || []).filter(p => !p.down);
       const p = ps.length ? ps[Math.floor(Math.random() * ps.length)] : { x: 0, z: -14 };
@@ -10958,7 +10962,7 @@ body {
       { const rr = rng(4242); SB.cars.forEach(c => { Object.assign(c, { x: c.home.x, z: c.home.z, h: c.home.h, driver: null }); c.works = c.own ? true : rr() < 0.62; c.fuel = c.own ? 0.12 : rr() < 0.3 ? 0 : 0.05 + rr() * 0.5; c.g.position.set(c.x, 0, c.z); c.g.rotation.y = c.h; c.g.visible = true; }); }
       Object.assign(MP, {
         on: true, net, name, color, hp: 100, down: false, rv: 0, kills: 0, aSeq: 0, aTarget: -1, swing: 0, cool: 0, hurt: 0,
-        nextId: 1, wave: 0, toSpawn: 0, spawnT: 0, brk: 1e9, clock: 480, day: 1, daySeen: undefined, dyInit: false, ua: 0, uaSeen: undefined, uaInit: false, upT: 0, ambT: 3, oks: false, ti: 0, tiId: -1, lastTi: {}, look: null, inCar: null, ride: null, cx: 0, lastCx: {}, foods: ["brødskive"], drinks: ["flaske vann"], food: 75, water: 70, hungerSeen: false, cans: 0, search: null, hs: 0, hsI: -1, lastHs: {}, over: 0, left: 0, epoch: 0, seenEpoch: -1,
+        nextId: 1, wave: 0, toSpawn: 0, spawnT: 0, brk: 1e9, clock: 480, day: 1, daySeen: undefined, phSeen: undefined, dyInit: false, ua: 0, uaSeen: undefined, uaInit: false, upT: 0, ambT: 3, oks: false, ti: 0, tiId: -1, lastTi: {}, look: null, inCar: null, ride: null, cx: 0, lastCx: {}, foods: ["brødskive"], drinks: ["flaske vann"], food: 75, water: 70, hungerSeen: false, cans: 0, search: null, hs: 0, hsI: -1, lastHs: {}, over: 0, left: 0, epoch: 0, seenEpoch: -1,
         lastSeq: {}, sendT: 0, hudT: 0, host: !net, wasHost: false, lastSnap: null, hostPeer: null, tk: 0, seen: {}, stale: new Set(), lastUpd: 0, wokeAt: -1e9, startAt: performance.now(), joinNear: true, joinKit: true, prevHost: null, hostNote: null, needAmmo: {}, checkpoint: 0, roar: 0, roarK: 0, roarSeen: 0, roarInit: false
       });
       MP.zs.clear();
@@ -11038,6 +11042,7 @@ body {
 
     function mpStop() {
       VILLAGE.forEach(h => { (h.items || []).forEach(it => h.group.remove(it.mesh)); h.items = null; h.gen = 0; });
+      OUT_ITEMS.forEach(it => scene3.remove(it.mesh)); OUT_ITEMS.length = 0; OUT_DAY = 0;
       if (MP.inCar) { MP.inCar = null; engine = false; carS.speed = 0; Sound.setEngine(false); }
       MP.ride = null;
       SB.cars.forEach(c => { c.driver = null; if (!SB.on) c.g.visible = false; });
@@ -11094,6 +11099,7 @@ body {
       if (MP.host) {
         p.zs = [...MP.zs.values()].slice(0, 45).map(z => [z.id, Math.round(z.x * 10), Math.round(z.z * 10), Math.round(z.h * 100), z.st, z.ty || 0, z.hp || 1, z.mx || 0, z.sl > 0 ? 1 : 0, z.slam || 0, z.buff > 0 ? 1 : 0]);
         p.tz = VILLAGE.reduce((a, h) => { (h.items || []).forEach(it => { if (it.taken) a.push(it.id); }); return a; }, []);
+        OUT_ITEMS.forEach(it => { if (it.taken) p.tz.push(it.id); });
         p.ck = Math.round(MP.clock ?? 480); p.dy = MP.day || 1; p.ua = MP.ua || 0;
         p.w = MP.wave; p.br = r1(MP.brk); p.ov = r1(MP.over); p.lf = MP.left; p.ep = MP.epoch; p.df = MP.df; p.md = MP.md; p.bb = MP.bossBy; p.rr = [MP.roar, MP.roarK]; p.pf = MP.perf; p.cp = MP.checkpoint; p.sd = MP.side; p.ch = [MP.ch, MP.chS, Math.round(MP.chT), MP.chL, MP.chN, MP.chWin];
         p.pk = [...MP.pk.values()].slice(0, 6).map(k => [k.id, Math.round(k.x * 10), Math.round(k.z * 10), k.k, Math.round((k.y || 0) * 10)]);
@@ -11256,8 +11262,8 @@ body {
     function mpSimulate(dt, players) {
       const alive = players.filter(p => !p.down);
       MP.simPlayers = players;
-      // Sandkasse: klokka går (1,5 spillminutter i sekundet), og en ny dag begynner ved midnatt
-      MP.clock = (MP.clock ?? 480) + dt * SB_TIME;
+      // Klokka: dagen varer 20 minutter og natta 10, og en ny dag begynner ved midnatt
+      MP.clock = (MP.clock ?? 480) + dt * mpRate(MP.clock ?? 480);
       if (MP.clock >= 1440) { MP.clock -= 1440; MP.day = (MP.day || 1) + 1; }
       // Alle nede: ingen omstart, dere kommer dere på beina igjen etter 6 sekunder
       if (players.length && alive.length === 0) {
@@ -11267,11 +11273,11 @@ body {
       MP.over = 0;
       let aliveZ = 0, ambZ = 0;
       MP.zs.forEach(z => { if (z.st === 0) { if (z.amb) ambZ++; else aliveZ++; } });
-      const night = 1 - sbDaylight(MP.clock);
-      const ambWant = Math.round((3 + Math.max(1, players.length) * 1.5 + night * 6 + Math.min(6, ((MP.day || 1) - 1) * 2)) * MP_DIFF.count[mpDf()]);
+      const night = 1 - mpDaylight(MP.clock);
+      const ambWant = Math.round((2 + Math.max(1, players.length) * 1.2 + Math.min(4, ((MP.day || 1) - 1) * 1.5)) * (1 + night * 2.5) * MP_DIFF.count[mpDf()]);
       MP.ambT = (MP.ambT || 0) - dt;
       if (ambZ < ambWant && MP.ambT <= 0 && aliveZ + ambZ < 40) {
-        MP.ambT = 2.5 + Math.random() * 2;
+        MP.ambT = night > 0.5 ? 0.7 + Math.random() * 0.9 : 2.5 + Math.random() * 2;
         const zo = mpSpawn(undefined, players.length, true);
         if (zo) zo.amb = true;
       }
@@ -11687,7 +11693,7 @@ body {
       for (let k = 0; k < Math.min(n, sl.length); k++) {
         let kind;
         if (h.kind === "bensin" && k < 2) kind = "can";
-        else { const x = r(); kind = x < 0.3 ? "food" : x < 0.55 ? "drink" : x < 0.66 ? "med" : x < 0.79 ? "ammo" : x < 0.85 ? "nade" : x < 0.9 ? "flare" : x < 0.945 ? "shells" : x < 0.975 ? "can" : x < 0.99 ? "oks" : "axe"; }
+        else { const x = r(); kind = x < 0.28 ? "food" : x < 0.5 ? "drink" : x < 0.6 ? "med" : x < 0.72 ? "ammo" : x < 0.77 ? "nade" : x < 0.82 ? "flare" : x < 0.87 ? "shells" : x < 0.95 ? "can" : x < 0.98 ? "oks" : "axe"; }
         const name = kind === "food" ? SB_FOODS[Math.floor(r() * SB_FOODS.length)] : kind === "drink" ? SB_DRINKS[Math.floor(r() * SB_DRINKS.length)] : ITEM_NAME[kind];
         const [lx, ly, lz] = sl[k], wy = ly + ITEM_H[kind] / 2;
         const mesh = new THREE.Mesh(ITEM_GEO[kind], ITEM_MAT[kind]); mesh.position.set(lx, wy, lz); mesh.rotation.y = r() * 3; h.group.add(mesh);
@@ -11695,8 +11701,38 @@ body {
       }
       h.gen = gen; h.searched = h.items.length === 0;
     }
-    function mpStockAll(day) { VILLAGE.forEach((h, i) => { const gd = mpGenDay(i, day || MP.day || 1); if (h.gen !== gd || !h.items) mpStock(h, i, gd); }); }
+    const OUT_ITEMS = [];
+    let OUT_DAY = 0, OUT_MAT = null;
+    function mpStockOut(day) {
+      mpItemAssets();
+      if (!OUT_MAT) { OUT_MAT = {}; for (const k in ITEM_MAT) OUT_MAT[k] = new THREE.MeshLambertMaterial({ color: ITEM_MAT[k].color, emissive: ITEM_MAT[k].color.clone().multiplyScalar(0.35) }); }
+      OUT_ITEMS.forEach(it => scene3.remove(it.mesh)); OUT_ITEMS.length = 0; OUT_DAY = day;
+      const r = rng(day * 7717 + 5);
+      const add = (kind, x, z) => {
+        if (OUT_ITEMS.length >= 60 || hitsStatic(x, z, 0.3, true, true)) return;
+        const name = kind === "food" ? SB_FOODS[Math.floor(r() * SB_FOODS.length)] : kind === "drink" ? SB_DRINKS[Math.floor(r() * SB_DRINKS.length)] : ITEM_NAME[kind];
+        const wy = ITEM_H[kind] / 2, mesh = new THREE.Mesh(ITEM_GEO[kind], OUT_MAT[kind]);
+        mesh.position.set(x, wy, z); mesh.rotation.y = r() * 3; scene3.add(mesh);
+        OUT_ITEMS.push({ id: 1000000 + (day % 1000) * 1000 + OUT_ITEMS.length, kind, name, mesh, taken: false, wx: x, wy, wz: z, out: true });
+      };
+      // Ved halvparten av bilene står det en kanne på bakken
+      SB.cars.forEach(c => {
+        if (r() > 0.5) return;
+        const h = c.home.h, side = r() < 0.5 ? -1.9 : 1.9;
+        add("can", c.home.x + side * Math.cos(h), c.home.z - side * Math.sin(h));
+      });
+      // Bensinstasjonen: tre kanner ved pumpene
+      const gas = VILLAGE.find(h => h.kind === "bensin");
+      if (gas) [-2.2, 1.8, 2.8].forEach(dx => add("can", gas.door.x + dx, gas.door.z - 1.4 - r() * 0.6));
+      // Langs veien: litt av hvert, mest bensin
+      for (let k = 0; k < 14; k++) {
+        const x = -145 + r() * 290, z = ROAD_Z + (r() < 0.5 ? -1 : 1) * (4 + r() * 5), q = r();
+        add(q < 0.35 ? "can" : q < 0.5 ? "food" : q < 0.65 ? "drink" : q < 0.78 ? "ammo" : q < 0.86 ? "med" : q < 0.94 ? "shells" : "flare", x, z);
+      }
+    }
+    function mpStockAll(day) { VILLAGE.forEach((h, i) => { const gd = mpGenDay(i, day || MP.day || 1); if (h.gen !== gd || !h.items) mpStock(h, i, gd); }); if (OUT_DAY !== (day || MP.day || 1)) mpStockOut(day || MP.day || 1); }
     function mpTakeId(id) {
+      if (id >= 1000000) { const o = OUT_ITEMS.find(x => x.id === id); if (o && !o.taken) { o.taken = true; o.mesh.visible = false; } return; }
       const h = VILLAGE[Math.floor((id % 1000) / 10)], it = h && h.items ? h.items.find(x => x.id === id) : null;
       if (!it || it.taken) return;
       it.taken = true; it.mesh.visible = false; h.searched = h.items.every(x => x.taken);
@@ -11716,6 +11752,15 @@ body {
           if (dot > bd) { bd = dot; best = it; }
         });
       });
+      if (!best && !VILLAGE.some(h => Math.abs(pos.x - h.x) < h.w / 2 && Math.abs(pos.z - h.z) < h.d / 2)) {
+        OUT_ITEMS.forEach(it => {
+          if (it.taken) return;
+          const dx = it.wx - pos.x, dy = it.wy - 1.7, dz = it.wz - pos.z, d = Math.hypot(dx, dy, dz);
+          if (d > 3 || d < 0.05) return;
+          const dot = (dx * fx + dy * fy + dz * fz) / d;
+          if (dot > bd) { bd = dot; best = it; }
+        });
+      }
       return best;
     }
     function mpTake(it) {
@@ -12773,14 +12818,26 @@ body {
       K9.fogT = MP.md === 2 && MP.left > 0 ? 0.085 : 0;
       const dark = MP.md === 4 && MP.left > 0;
       // Lyset følger klokka, som i sandkassen
-      const dayT = dark ? 0 : sbDaylight(MP.clock ?? 480);
+      const dayT = dark ? 0 : mpDaylight(MP.clock ?? 480);
+      // Skumring og gry: si fra når natta (og zombiene) kommer, og når den er over
+      {
+        const ck = MP.clock ?? 480, ph = ck >= 1080 && ck < 1200 ? 1 : mpIsDay(ck) ? 0 : ck >= 420 && ck < 480 ? 3 : 2;
+        if (MP.phSeen === undefined) MP.phSeen = ph;
+        if (ph !== MP.phSeen) {
+          MP.phSeen = ph;
+          if (ph === 1) { MP.msg = "Det begynner å bli mørkt. Om natta kommer det mange flere zombier – finn et hus eller hold sammen!"; MP.msgT = 4.5; MP.feed.push({ n: "Kveld", c: 3, t: "natta kommer", age: 0 }); }
+          else if (ph === 2) { MP.msg = "Natt! Zombiene kommer fra alle kanter."; MP.msgT = 3; }
+          else if (ph === 3) { MP.msg = "Det lysner. Snart færre zombier."; MP.msgT = 3; MP.feed.push({ n: "Morgen", c: 3, t: "det lysner", age: 0 }); }
+        }
+      }
       // Ny dag: noen av husene har fått nye forsyninger (samme hus hos alle, valgt ut fra dagnummeret)
       if (MP.daySeen === undefined) MP.daySeen = MP.day || 1;
       if ((MP.day || 1) !== MP.daySeen) {
         MP.daySeen = MP.day || 1;
         let n = 0;
         VILLAGE.forEach((h, i) => { if (mpRestockR(i, MP.daySeen) < 0.4) { mpStock(h, i, MP.daySeen); n++; } });
-        MP.msg = `Dag ${MP.daySeen}! ${n ? n + " hus har fått nye forsyninger." : "Bygda er stille."}`; MP.msgT = 3.5;
+        mpStockOut(MP.daySeen);
+        MP.msg = `Dag ${MP.daySeen}! ${n ? n + " hus har fått nye forsyninger, og det ligger" : "Det ligger"} nye bensinkanner ute ved bilene og langs veien.`; MP.msgT = 4;
         MP.feed.push({ n: `Dag ${MP.daySeen}`, c: 3, t: `${n} hus har nye ting`, age: 0 });
       }
       // Alle lå nede: reis deg (verten teller opp, alle følger etter)
@@ -14124,6 +14181,7 @@ body {
     const ck = Math.floor(s.clock ?? 480), hhmm = `${String(Math.floor(ck / 60)).padStart(2, "0")}:${String(ck % 60).padStart(2, "0")}`;
     $("mp-wave").textContent = [
       `Dag ${s.day || 1} · ${hhmm}`,
+      ck >= 480 && ck < 1200 ? `mørkt om ${Math.max(1, Math.ceil((1200 - ck) / 0.6 / 60))} min` : `natt · lyst om ${Math.max(1, Math.ceil(((480 - ck + 1440) % 1440) / 1.2 / 60))} min`,
       s.left > 0 ? `Flokk ${s.wave}` : "",
       s.wave > 0 && s.md && s.left > 0 ? ["", "Løperflokk", "Tåke", "Horde", "Mørke"][s.md] : "",
       df !== 1 ? MP_DF_NAME[df] : ""
