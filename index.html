@@ -8047,6 +8047,8 @@ if (TW_LANG === "en") {
       fires.forEach(f => updateFire(f, t));
       if (SB.on || mode3 === "mp") landTick(dt);
       cityMat.color.setScalar(0.85 + 0.1 * Math.sin(t * 2.3) + 0.05 * Math.sin(t * 5.1));
+      // Den brennende byen på himmelen: bare i historien (ikke i flerspiller, og ikke på Mars)
+      cityMat.visible = mode3 !== "mp" && K2.scene !== "marsView";
       updateSnow(dt, t);
       updateZombies(t, dt);
       updatePart2(t, dt);
@@ -19988,7 +19990,7 @@ if (TW_LANG === "en") {
 
   // Versjonsnummer nede i høyre hjørne: hvitt når dette er den nyeste versjonen, rødt når det finnes en nyere på GitHub
   {
-    const TW_VER = 235;
+    const TW_VER = 236;
     const el = document.createElement("div");
     el.className = "twver"; el.id = "twver";
     el.textContent = _T`Versjon 0,${TW_VER}`;
