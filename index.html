@@ -6754,7 +6754,7 @@ if (TW_LANG === "en") {
       const g = new T.Group();
       const paint = carMat(T, "p" + color, () => new T.MeshLambertMaterial({ color }));
       const mats = {
-        paint,
+        paint: see ? carMat(T, "pSee" + color, () => paint.clone()) : paint,
         glass: see ? carMat(T, "glassSee", () => new T.MeshLambertMaterial({ color: 0x0b1418, transparent: true, opacity: 0.5, depthWrite: false })) : carMat(T, "glass", () => new T.MeshPhongMaterial({ color: 0x0c1418, specular: 0x9fb4c0, shininess: 70 })),
         black: carMat(T, "black", () => new T.MeshLambertMaterial({ color: 0x111315 })),
         bump: carMat(T, "bump", () => new T.MeshLambertMaterial({ color: 0x2a2e32 })),
@@ -6803,7 +6803,7 @@ if (TW_LANG === "en") {
       if (acc > 0.4 && acc < 0.52) {
         const pile = new T.Mesh(carMat(T, "spGeo", () => new T.BoxGeometry(1.4, 0.22, 1.6)), mats.snowb); pile.position.set(0, S.roofY + 0.18, roofZ); g.add(pile);
       }
-      g.userData.brand = br.name; g.userData.model = model; g.userData.style = style; g.userData.n = n; g.userData.col = color; g.userData.dy = S.dy;
+      g.userData.brand = br.name; g.userData.model = model; g.userData.style = style; g.userData.roofY = S.roofY; g.userData.gh = S.gh; g.userData.paint = mats.paint; g.userData.n = n; g.userData.col = color; g.userData.dy = S.dy;
       return g;
     }
 
@@ -6823,6 +6823,178 @@ if (TW_LANG === "en") {
       carG.add(g); CSKIN.cur = g; CSKIN.k = key;
       const dy = g.userData.dy || 0;
       CSKIN.lights.forEach(([h, tl]) => { h.position.set(h.position.x, 0.62 + dy, -2.18); tl.position.set(tl.position.x, 0.74 + dy, 2.18); });
+    }
+
+    // Interiøret i flerspiller: bygges første gang du sitter i en bil
+    const CINT = { g: null };
+    function cintBuild() {
+      const T = THREE, g = new T.Group(), L = c => carMat(T, "ci" + c, () => new T.MeshLambertMaterial({ color: c }));
+      const box = (w, h, d, c, x, y, z, rx, p) => { const m = new T.Mesh(new T.BoxGeometry(w, h, d), typeof c === "number" ? L(c) : c); m.position.set(x, y, z); if (rx) m.rotation.x = rx; (p || g).add(m); return m; };
+      const cyl = (r1, r2, h, c, x, y, z, rx, p) => { const m = new T.Mesh(new T.CylinderGeometry(r1, r2, h, 12), typeof c === "number" ? L(c) : c); m.position.set(x, y, z); if (rx) m.rotation.x = rx; (p || g).add(m); return m; };
+      // Gulv, dørsider med armlene og håndtak
+      box(1.5, 0.14, 2.6, 0x19191b, 0, 0.46, 0.3);
+      const doors = [-1, 1].map(sd => box(0.04, 1, 1, 0x2a2c30, sd * 0.74, 0, 0));
+      const fire = box(1.48, 0.44, 0.04, 0x141516, 0, 0.64, -0.6);
+      const backW = box(1.48, 1, 0.04, 0x1d1f22, 0, 0, 0);
+      [-1, 1].forEach(sd => {
+        box(0.09, 0.05, 0.5, 0x3a3d42, sd * 0.69, 0.86, 0.12);
+        box(0.02, 0.03, 0.1, 0x9aa0a6, sd * 0.715, 0.95, -0.12);
+        box(0.03, 0.12, 0.18, 0x111214, sd * 0.725, 0.6, -0.25);
+      });
+      // Dashbordet: polstret topp, instrumenthus foran sjåføren, midtkonsoll med radio og luftdyser
+      box(1.56, 0.28, 0.5, 0x1d1f22, 0, 0.97, -0.82);
+      box(1.56, 0.06, 0.44, 0x2a2d31, 0, 1.13, -0.86, -0.12);
+      box(0.52, 0.035, 0.17, 0x111214, -0.4, 1.135, -0.67, -0.1);
+      const gc = document.createElement("canvas"); gc.width = 256; gc.height = 96;
+      const gt = new T.CanvasTexture(gc);
+      const gauge = new T.Mesh(new T.PlaneGeometry(0.48, 0.18), new T.MeshBasicMaterial({ map: gt }));
+      gauge.position.set(-0.4, 1.075, -0.6); gauge.rotation.x = -0.4; g.add(gauge);
+      box(0.38, 0.34, 0.12, 0x16181a, 0, 0.92, -0.6);
+      const radio = new T.Mesh(new T.PlaneGeometry(0.2, 0.075), new T.MeshBasicMaterial({ color: 0x1e3a48 })); radio.position.set(0, 1.0, -0.538); g.add(radio);
+      [[-0.1, 1.08], [0.1, 1.08], [-0.66, 1.06], [0.66, 1.06]].forEach(([x, y]) => { for (let k = 0; k < 3; k++) box(0.15, 0.012, 0.02, 0x0a0a0b, x, y + k * 0.018 - 0.018, Math.abs(x) > 0.3 ? -0.575 : -0.535); });
+      box(0.07, 0.07, 0.02, 0x2c2f33, -0.07, 0.86, -0.535); box(0.07, 0.07, 0.02, 0x2c2f33, 0.07, 0.86, -0.535);
+      // Hanskerom og rattstamme
+      box(0.5, 0.16, 0.02, 0x23262a, 0.4, 0.88, -0.565);
+      cyl(0.035, 0.045, 0.24, 0x101112, -0.4, 1.02, -0.69, Math.PI / 2 + 0.35);
+      // Midtkonsoll mellom setene: girspak og håndbrekk
+      box(0.22, 0.22, 0.75, 0x1b1d20, 0, 0.55, 0.12);
+      cyl(0.011, 0.014, 0.16, 0x0c0c0d, 0, 0.73, -0.08);
+      const knob = new T.Mesh(new T.SphereGeometry(0.03, 10, 8), L(0x202224)); knob.position.set(0, 0.82, -0.08); g.add(knob);
+      box(0.04, 0.03, 0.22, 0x0e0f10, 0.05, 0.69, 0.28, -0.3);
+      // Forsetene: sete, ryggstø som heller bakover, nakkestøtte
+      const fab = 0x2b2e33, fab2 = 0x34383e;
+      const seat = (x, z, w) => {
+        box(w, 0.13, 0.5, fab, x, 0.6, z);
+        box(w * 0.86, 0.04, 0.42, fab2, x, 0.68, z);
+        const b = box(w, 0.64, 0.11, fab, x, 0.97, z + 0.3, 0.14);
+        box(w * 0.6, 0.5, 0.02, fab2, x, 0.98, z + 0.24, 0.14);
+        return b;
+      };
+      seat(-0.4, 0.2, 0.5); seat(0.4, 0.2, 0.5);
+      [-0.4, 0.4].forEach(x => { box(0.26, 0.17, 0.09, fab, x, 1.38, 0.6, 0.1); cyl(0.008, 0.008, 0.08, 0x777b80, x - 0.07, 1.27, 0.58); cyl(0.008, 0.008, 0.08, 0x777b80, x + 0.07, 1.27, 0.58); });
+      // Baksetet (ikke i pickupen, der er det lasteplan)
+      const rear = new T.Group(); g.add(rear);
+      box(1.36, 0.13, 0.48, fab, 0, 0.62, 1.0, 0, rear);
+      box(1.36, 0.62, 0.11, fab, 0, 0.98, 1.29, 0.12, rear);
+      [-0.42, 0.42].forEach(x => box(0.24, 0.15, 0.08, fab, x, 1.36, 1.36, 0.1, rear));
+      // Takhimling, innvendig speil og solskjermer (flyttes etter bilens tak)
+      const roof = new T.Group(); g.add(roof);
+      const liner = box(1.5, 0.03, 1, 0x7c7a74, 0, 0, 0, 0, roof);
+      const mirror = new T.Group(); roof.add(mirror);
+      box(0.25, 0.07, 0.025, 0x111214, 0, 0, 0, 0, mirror);
+      const mg = new T.Mesh(new T.PlaneGeometry(0.22, 0.05), new T.MeshBasicMaterial({ color: 0x5d6b77 })); mg.position.set(0, 0, 0.014); mirror.add(mg);
+      box(0.015, 0.08, 0.015, 0x111214, 0, 0.05, -0.02, 0, mirror);
+      const visors = [-0.42, 0.42].map(x => box(0.38, 0.02, 0.16, 0x6e6c66, x, 0, 0, 0, roof));
+      // Hender med hansker på rattet (følger rattet når du svinger), og eiker og nav på rattet
+      const hands = new T.Group(); steerWheel.add(hands);
+      const glove = 0x2a2622, sleeve = new T.MeshLambertMaterial({ color: 0x3b4148 });
+      [-1, 1].forEach(sd => {
+        const hnd = new T.Group(); hnd.position.set(sd * 0.135, 0.07, 0.02); hnd.rotation.z = sd * -0.5; hands.add(hnd);
+        box(0.042, 0.065, 0.05, glove, 0, 0, 0, 0, hnd);
+        box(0.055, 0.055, 0.2, sleeve, sd * 0.01, -0.035, 0.12, -0.45, hnd);
+      });
+      const spokes = new T.Group(); steerWheel.add(spokes);
+      cyl(0.045, 0.05, 0.04, 0x161718, 0, 0, 0.01, Math.PI / 2, spokes);
+      [[-0.075, 0, 0], [0.075, 0, 0], [0, -0.075, Math.PI / 2]].forEach(([x, y, rz]) => { const sp = box(0.12, 0.025, 0.015, 0x161718, x, y, 0, 0, spokes); sp.rotation.z = rz; });
+      // Folk i setene: kropp, hode med lue, lår og armer (fargen til lagkameraten)
+      const skin = 0xd9b48f, pants = 0x2a3038;
+      const figs = [0, 1, 2, 3].map(seatN => {
+        const f = new T.Group(); g.add(f); f.visible = false;
+        const jm = new T.MeshLambertMaterial({ color: 0x777777 });
+        box(0.4, 0.52, 0.24, jm, 0, 0.98, 0.05, 0.1, f);
+        box(0.21, 0.24, 0.23, skin, 0, 1.38, 0, 0, f);
+        box(0.23, 0.09, 0.25, jm, 0, 1.52, 0.01, 0, f);
+        [-0.1, 0.1].forEach(x => { box(0.15, 0.13, 0.44, pants, x, 0.72, -0.17, 0, f); box(0.13, 0.4, 0.13, pants, x, 0.5, -0.38, 0, f); });
+        [-1, 1].forEach(sd => {
+          const arm = box(0.11, 0.42, 0.12, jm, sd * 0.26, 1.0, seatN === 0 ? -0.08 : 0.04, seatN === 0 ? 1.0 : 0.15, f);
+          if (seatN === 0) arm.rotation.z = sd * 0.25;
+        });
+        return { f, jm };
+      });
+      g.visible = false; carG.add(g);
+      Object.assign(CINT, { sleeve, doors, fire, backW, g, gc, gt, rear, roof, liner, mirror, visors, hands, figs, shellK: null, gT: 0, sp: 0, lx: 0, lz: 0 });
+    }
+    // Målerne: fart (km/t), turtall og bensin
+    function cintGauge(kmh, fuelF) {
+      const g = CINT.gc.getContext("2d");
+      g.fillStyle = "#07090b"; g.fillRect(0, 0, 256, 96);
+      const dial = (cx, cy, r, v, max, label, step) => {
+        g.strokeStyle = "rgba(220,230,235,0.75)"; g.lineWidth = 2;
+        g.beginPath(); g.arc(cx, cy, r, Math.PI * 0.75, Math.PI * 2.25); g.stroke();
+        for (let k = 0; k <= max; k += step) {
+          const a = Math.PI * 0.75 + (k / max) * Math.PI * 1.5;
+          g.beginPath(); g.moveTo(cx + Math.cos(a) * (r - 6), cy + Math.sin(a) * (r - 6)); g.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); g.stroke();
+        }
+        g.fillStyle = "rgba(220,230,235,0.8)"; g.font = "700 11px sans-serif"; g.textAlign = "center"; g.fillText(label, cx, cy + r * 0.55);
+        const a = Math.PI * 0.75 + Math.min(1, v / max) * Math.PI * 1.5;
+        g.strokeStyle = "#ff6a2a"; g.lineWidth = 3;
+        g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.cos(a) * (r - 4), cy + Math.sin(a) * (r - 4)); g.stroke();
+        g.fillStyle = "#222"; g.beginPath(); g.arc(cx, cy, 4, 0, 7); g.fill();
+      };
+      dial(70, 52, 38, kmh, 160, "km/h", 20);
+      dial(178, 52, 30, 800 + kmh * 38, 6000, "rpm", 1000);
+      // Bensin: en liten stolpe til høyre, rød når det er lite igjen
+      g.strokeStyle = "rgba(220,230,235,0.6)"; g.lineWidth = 1; g.strokeRect(226, 18, 12, 62);
+      g.fillStyle = fuelF < 0.15 ? "#ff3a2a" : "#e0d080"; g.fillRect(228, 20 + 58 * (1 - fuelF), 8, 58 * fuelF);
+      g.fillStyle = "rgba(220,230,235,0.8)"; g.font = "700 10px sans-serif"; g.fillText("⛽", 232, 92);
+      g.fillStyle = "#7fd0ff"; g.font = "700 14px sans-serif"; g.fillText(String(Math.round(kmh)), 70, 32);
+      CINT.gt.needsUpdate = true;
+    }
+    // Hver ramme i flerspiller: vis interiøret når du sitter i en bil, med de som sitter der
+    function cintTick(dt) {
+      const car = MP.inCar || MP.ride, on = mode3 === "mp" && !!car;
+      carG.userData.oldIn.forEach(o => { o.visible = !on; });
+      if (!on) {
+        if (CINT.g) { CINT.g.visible = false; CINT.hands.visible = false; }
+        if (CINT.pm) { CINT.pm.clippingPlanes = null; CINT.pm.needsUpdate = true; CINT.pm = null; CINT.shellK = null; }
+        return;
+      }
+      if (!CINT.g) cintBuild();
+      CINT.g.visible = true;
+      // Formen på bilen: takhøyde, frontrute og om det er en pickup
+      const u = CSKIN.cur ? CSKIN.cur.userData : {};
+      if (CINT.shellK !== CSKIN.k) {
+        CINT.shellK = CSKIN.k;
+        const ry = u.roofY || 1.44, gh = u.gh || [[-0.9, 1], [-0.28, ry], [0.85, ry], [1.4, 1]], a = gh[1][0], b = gh[2][0];
+        CINT.roof.position.set(0, ry - 0.02, 0);
+        CINT.liner.position.set(0, 0, (a + b) / 2); CINT.liner.scale.z = Math.max(0.5, b - a + 0.1);
+        CINT.mirror.position.set(0, -0.13, a + 0.13);
+        CINT.visors.forEach(v => v.position.set(v.position.x, -0.02, a + 0.12));
+        CINT.rear.visible = u.style !== "pickup";
+        const belt = 0.92 + (u.dy || 0), zMax = u.style === "pickup" ? 0.52 : 1.6;
+        CINT.doors.forEach(d => { d.scale.set(1, belt + 0.01 - 0.42, zMax + 0.6); d.position.set(d.position.x, (belt + 0.43) / 2, (zMax - 0.6) / 2); });
+        CINT.backW.scale.set(1, belt - 0.42, 1); CINT.backW.position.set(0, (belt + 0.42) / 2, zMax - 0.02);
+        CINT.zMax = zMax; CINT.ry = ry;
+        if (!CINT.planes) CINT.planes = [0, 1, 2, 3, 4, 5].map(() => new THREE.Plane());
+        CINT.local = [[1, 0, 0, -0.73], [-1, 0, 0, -0.73], [0, -1, 0, 0.52], [0, 1, 0, -(ry - 0.06)], [0, 0, -1, -0.6], [0, 0, 1, -zMax]].map(([x, y, z, c]) => new THREE.Plane(new THREE.Vector3(x, y, z), c));
+        if (CINT.pm && CINT.pm !== u.paint) { CINT.pm.clippingPlanes = null; CINT.pm.needsUpdate = true; }
+        CINT.pm = u.paint || null;
+        if (CINT.pm) { renderer.localClippingEnabled = true; CINT.pm.clippingPlanes = CINT.planes; CINT.pm.clipIntersection = true; CINT.pm.needsUpdate = true; }
+      }
+      // Hulrommet følger bilen
+      carG.updateMatrixWorld();
+      CINT.local.forEach((p, i) => CINT.planes[i].copy(p).applyMatrix4(carG.matrixWorld));
+      // Hvem sitter hvor: deg selv ser du ikke (bare hendene om du kjører)
+      const idx = mpCarIdx(car), mySeat = MP.inCar ? 0 : MP.seat | 0, occ = new Map();
+      (MP.othersL || []).forEach(p => {
+        const q = p.presence;
+        if (MP.stale.has(p.peer)) return;
+        if (MP.ride && p.peer === MP.ride.driver) occ.set(0, q.c | 0);
+        else if (q.ri === idx && Array.isArray(q.se)) occ.set(q.se[0] | 0, q.c | 0);
+      });
+      CINT.figs.forEach((fg, i) => {
+        const st = mpSeatPos(car, i), show = i !== mySeat && occ.has(i) && !st.bed;
+        fg.f.visible = show;
+        if (show) { fg.f.position.set(st.lx, 0, st.lz + 0.2); fg.jm.color.setHex(MP_COLORS[occ.get(i) % MP_COLORS.length]); }
+      });
+      CINT.hands.visible = mySeat === 0 || occ.has(0);
+      CINT.sleeve.color.setHex(MP_COLORS[(mySeat === 0 ? MP.color : occ.get(0)) % MP_COLORS.length | 0] || 0x3b4148).multiplyScalar(0.55);
+      // Farten: din egen når du kjører, ellers målt fra hvor fort bilen flytter seg
+      let sp = Math.abs(carS.speed);
+      if (!MP.inCar) { const gp = car.g.position; sp = dt > 0 ? Math.hypot(gp.x - CINT.lx, gp.z - CINT.lz) / dt : 0; CINT.lx = gp.x; CINT.lz = gp.z; if (sp > 60) sp = 0; }
+      CINT.sp += (sp - CINT.sp) * Math.min(1, dt * 4);
+      CINT.gT -= dt;
+      if (CINT.gT <= 0) { CINT.gT = 0.08; cintGauge(CINT.sp * 3.6, Math.max(0, Math.min(1, MP.inCar ? fuel : car.fuel || 0))); }
     }
 
     function makeTruck(T) {
@@ -7032,17 +7204,18 @@ if (TW_LANG === "en") {
       const dash = new T.Mesh(new T.BoxGeometry(1.7, 0.2, 0.45), lam(0x111315));
       dash.position.set(0, 1.04, -0.78);
       carG.add(dash);
+      const oldIn = carG.userData.oldIn = [dash];
       [[-0.55, 0x3fa0ff], [-0.25, 0xff8a2a], [0.2, 0x8fd18a]].forEach(([x, c]) => {
         const l = new T.Mesh(new T.BoxGeometry(0.05, 0.02, 0.02), new T.MeshBasicMaterial({ color: c }));
         l.position.set(x, 1.15, -0.58);
-        carG.add(l);
+        carG.add(l); oldIn.push(l);
       });
       // Seter
       [[-0.4, 0.45], [0.4, 0.45], [0, 1.1]].forEach(([x, z], i) => {
         const seat = new T.Mesh(new T.BoxGeometry(i === 2 ? 1.5 : 0.55, 0.15, 0.55), lam(0x15181b));
         seat.position.set(x, 0.72, z); carG.add(seat);
         const back = new T.Mesh(new T.BoxGeometry(i === 2 ? 1.5 : 0.55, 0.6, 0.12), lam(0x15181b));
-        back.position.set(x, 1.0, z + 0.3); carG.add(back);
+        back.position.set(x, 1.0, z + 0.3); carG.add(back); oldIn.push(seat, back);
       });
       steerWheel = new T.Mesh(new T.TorusGeometry(0.15, 0.022, 8, 24), lam(0x0c0c0c));
       steerWheel.position.set(-0.4, 0.98, -0.58);
@@ -8014,7 +8187,7 @@ if (TW_LANG === "en") {
       // og et lys som kommer og går gjør at alt må bygges på nytt), men står under bakken når du ikke kjører.
       carG.visible = !(mode3 === "sb" && !SB.inCar);
       {
-        const c = mode3 === "sb" && SB.inCar ? SB.inCar : mode3 === "mp" && MP.inCar ? MP.inCar : null, u = c && c.g && c.g.userData;
+        const c = mode3 === "sb" && SB.inCar ? SB.inCar : mode3 === "mp" && MP.inCar ? MP.inCar : mode3 === "mp" && MP.ride ? MP.ride : null, u = c && c.g && c.g.userData;
         if (u && u.n !== undefined) carSkinSet(u.n, u.col); else if (!c) carSkinSet(CSKIN.story, 0x24343f);
       }
       if (mode3 === "mp" && MP.inCar) { pos.x = carS.x; pos.z = carS.z; yaw = carS.h; }
@@ -8026,9 +8199,10 @@ if (TW_LANG === "en") {
       }
 
       const wreck = wrecked();
-      carG.position.set(carS.x, mode3 === "mp" && !MP.inCar ? -60 : 0, carS.z);
+      carG.position.set(carS.x, mode3 === "mp" && !MP.inCar && !MP.ride ? -60 : 0, carS.z);
       carG.rotation.set(wreck ? 0.05 : 0, carS.h, wreck ? -0.03 : 0);
       steerWheel.rotation.set(0.35, 0, -carS.steer * 2.2);
+      if (carG.userData.oldIn) cintTick(dt);
 
       // Fast blikkretning i filmscenene glir mykt mot målet fra manuset
       if (mode3 === "crash" || mode3 === "rock" || mode3 === "cut" || mode3 === "cruise") {
@@ -15063,6 +15237,7 @@ if (TW_LANG === "en") {
         if (!hitsStatic(x, z, 0.35, false, true) && !blocked(x, z)) { pos.x = x; pos.z = z; break; }
       }
       yaw = c.g.rotation.y + lookYaw; pitch = -0.05; lookYaw = 0; lookPitch = 0;
+      c.g.visible = true;
       MP.ride = null; Sound.door();
       if (msg) { MP.msg = msg; MP.msgT = 1.8; }
       mpSend();
@@ -15860,7 +16035,7 @@ if (TW_LANG === "en") {
         SB.cars.forEach(c => { if (c.driver === p.peer && c !== cc) c.driver = null; });
         if (cc && cc !== MP.inCar && cq.slice(1).every(Number.isFinite)) {
           cc.driver = p.peer; cc.x = cq[1] / 10; cc.z = cq[2] / 10; cc.h = cq[3] / 100;
-          cc.g.visible = true; cc.g.position.x += (cc.x - cc.g.position.x) * 0.5; cc.g.position.z += (cc.z - cc.g.position.z) * 0.5;
+          cc.g.visible = cc !== MP.ride; cc.g.position.x += (cc.x - cc.g.position.x) * 0.5; cc.g.position.z += (cc.z - cc.g.position.z) * 0.5;
           let dh = cc.h - cc.g.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh)); cc.g.rotation.y += dh * 0.5;
         }
         const cxq = Array.isArray(q.cx) && q.cx.length >= 6 && q.cx.every(Number.isFinite) ? q.cx : null, cxs = cxq ? cxq[0] | 0 : 0;
@@ -20066,7 +20241,7 @@ if (TW_LANG === "en") {
 
   // Versjonsnummer nede i høyre hjørne: hvitt når dette er den nyeste versjonen, rødt når det finnes en nyere på GitHub
   {
-    const TW_VER = 237;
+    const TW_VER = 238;
     const el = document.createElement("div");
     el.className = "twver"; el.id = "twver";
     el.textContent = _T`Versjon 0,${TW_VER}`;
