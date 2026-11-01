@@ -14414,7 +14414,7 @@ if (TW_LANG === "en") {
       VILLAGE.forEach(h => { h.searched = false; h.doorPivot.rotation.y = 0; h.gen = 0; });
       worldReset(true);
       mpStockAll(1);
-      { const rr = rng(4242); SB.cars.forEach(c => { Object.assign(c, { x: c.home.x, z: c.home.z, h: c.home.h, driver: null }); c.works = c.own ? true : rr() < 0.62; c.fuel = c.own ? 0.12 : rr() < 0.3 ? 0 : 0.05 + rr() * 0.5; c.g.position.set(c.x, 0, c.z); c.g.rotation.y = c.h; c.g.visible = true; }); }
+      { const rr = rng(4242); SB.cars.forEach(c => { Object.assign(c, { x: c.home.x, z: c.home.z, h: c.home.h, driver: null }); c.works = c.mpOk = c.own ? true : rr() < 0.1; c.fuel = c.own ? 0.12 : rr() < 0.3 ? 0 : 0.05 + rr() * 0.5; c.g.position.set(c.x, 0, c.z); c.g.rotation.y = c.h; c.g.visible = true; }); }
       Object.assign(MP, {
         on: true, net, name, color, hp: 100, down: false, rv: 0, kills: 0, aSeq: 0, aTarget: -1, swing: 0, cool: 0, hurt: 0,
         nextId: 1, wave: 0, toSpawn: 0, spawnT: 0, brk: 1e9, clock: 480, day: 1, daySeen: undefined, phSeen: undefined, god: false, guns: new Set(), gun: "", txs: 0, txt: "", txT: 0, lastTx: {}, ffSeq: 0, ffA: null, lastFf: {}, headTip: 0, drL: [], drSeq: 0, lastDr: {}, tcL: [], logs: 0, planks: 0, stones: 0, doorH: null, dyInit: false, ua: 0, uaSeen: undefined, uaInit: false, upT: 0, ambT: 3, oks: false, ti: 0, tiId: -1, lastTi: {}, look: null, inCar: null, ride: null, cx: 0, lastCx: {}, foods: [_t("brødskive")], drinks: [_t("flaske vann")], food: 75, water: 70, hungerSeen: false, cans: 0, search: null, hs: 0, hsI: -1, lastHs: {}, over: 0, left: 0, epoch: 0, seenEpoch: -1,
@@ -14596,7 +14596,7 @@ if (TW_LANG === "en") {
       if (Array.isArray(w.cars)) w.cars.forEach((a, i) => {
         const c = SB.cars[i];
         if (!c || c.driver || !Array.isArray(a) || !a.slice(0, 4).every(v => typeof v === "number" && Number.isFinite(v))) return;
-        c.x = Math.max(WB[0], Math.min(WB[1], a[0])); c.z = Math.max(WB[2], Math.min(WB[3], a[1])); c.h = a[2]; c.fuel = Math.max(0, Math.min(1, a[3])); c.works = !!a[4];
+        c.x = Math.max(WB[0], Math.min(WB[1], a[0])); c.z = Math.max(WB[2], Math.min(WB[3], a[1])); c.h = a[2]; c.fuel = Math.max(0, Math.min(1, a[3])); c.works = !!a[4] && c.mpOk !== false;
         c.g.position.set(c.x, 0, c.z); c.g.rotation.y = c.h;
       });
       if (Array.isArray(w.bz)) {
@@ -20795,7 +20795,7 @@ if (TW_LANG === "en") {
 
   // Versjonsnummer nede i høyre hjørne: hvitt når dette er den nyeste versjonen, rødt når det finnes en nyere på GitHub
   {
-    const TW_VER = 244;
+    const TW_VER = 245;
     const el = document.createElement("div");
     el.className = "twver"; el.id = "twver";
     el.textContent = _T`Versjon 0,${TW_VER}`;
